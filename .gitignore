@@ -1,0 +1,7 @@
+.pio/
+.vscode/
+.DS_Store
+build/
+.codex-remote-attachments/
+tools/.font-tools/
+tools/.pip-cache/
