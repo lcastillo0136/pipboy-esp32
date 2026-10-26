@@ -90,7 +90,17 @@ El endpoint solicita la imagen sin logo ni texto superpuesto para no perder
 legibilidad al convertirla a 1 bit. Por ello envía la atribución configurada
 en la cabecera `X-Pipboy-Attribution`. El firmware debe mostrar la atribución
 configurada siempre que visualice el mapa; revisa las fuentes finales del
-estilo por si Mapbox exige texto adicional.
+estilo por si Mapbox exige texto adicional. La caché incorpora el propietario
+y el ID del estilo: al publicar un estilo distinto se crea automáticamente un
+bitmap nuevo, sin reutilizar el generado por el estilo anterior.
+La conversión usa el contraste de cada imagen para conservar líneas
+antialiasadas del estilo publicado; una imagen sin contraste se mantiene negra
+en vez de llenar la pantalla de ruido.
+
+Mapbox puede conservar una versión de un estilo en la CDN de Static Images
+hasta 12 horas después de publicarlo. Si necesitas que una revisión visual
+aparezca de inmediato, duplica el estilo en Mapbox Studio, publícalo y cambia
+en `config.php` su `mapbox_style_id`: el ID nuevo no reutiliza esa caché.
 
 Mapbox documenta que, incluso al desactivar la atribución incrustada, la
 atribución correcta de los datos (incluido OpenStreetMap cuando corresponda)

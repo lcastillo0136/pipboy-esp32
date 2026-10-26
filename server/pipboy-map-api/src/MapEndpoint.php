@@ -20,6 +20,9 @@ final class PipboyMapEndpoint
 {
     private const HEADER_LENGTH = 12;
     private const MAX_UPSTREAM_BYTES = 2097152;
+    // Cambiar esta version fuerza un bitmap nuevo si evoluciona el algoritmo
+    // de conversión, sin reutilizar una caché de otra representación visual.
+    private const BITMAP_CONVERSION_VERSION = '2';
 
     public static function run(string $configPath): void
     {
@@ -189,6 +192,12 @@ final class PipboyMapEndpoint
         }
 
         $cacheKey = implode('|', array(
+            self::BITMAP_CONVERSION_VERSION,
+            // El estilo forma parte del resultado. Incluirlo invalida
+            // automaticamente los bitmaps creados antes de publicar o
+            // sustituir el estilo de Mapbox.
+            (string) $config['mapbox_style_owner'],
+            (string) $config['mapbox_style_id'],
             number_format(round($request['latitude'], 4), 4, '.', ''),
             number_format(round($request['longitude'], 4), 4, '.', ''),
             $request['zoom'],
@@ -292,6 +301,31 @@ final class PipboyMapEndpoint
 
         $bytesPerRow = (int) ceil($width / 8);
         $pixels = '';
+        $luminanciaMinima = 255.0;
+        $luminanciaMaxima = 0.0;
+
+        // Mapbox antialiasa las lineas. Un umbral fijo puede descartar todos
+        // los trazos si la versión publicada del estilo usa verdes más
+        // tenues. Medimos el rango de la imagen antes de empaquetarla.
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $rgba = imagecolorat($image, $x, $y);
+                $red = ($rgba >> 16) & 0xFF;
+                $green = ($rgba >> 8) & 0xFF;
+                $blue = $rgba & 0xFF;
+                $luminancia = (0.2126 * $red) + (0.7152 * $green) + (0.0722 * $blue);
+                $luminanciaMinima = min($luminanciaMinima, $luminancia);
+                $luminanciaMaxima = max($luminanciaMaxima, $luminancia);
+            }
+        }
+
+        $rangoLuminancia = $luminanciaMaxima - $luminanciaMinima;
+        // Una imagen de fondo uniforme permanece vacía. Para un estilo con
+        // detalle, conservar el 45 % superior del contraste recupera tanto
+        // las vialidades principales como las secundarias.
+        $umbral = $rangoLuminancia < 12.0
+            ? PHP_FLOAT_MAX
+            : max(24.0, $luminanciaMinima + ($rangoLuminancia * 0.55));
 
         for ($y = 0; $y < $height; $y++) {
             $row = '';
@@ -305,9 +339,9 @@ final class PipboyMapEndpoint
                 $alpha = ($rgba >> 24) & 0x7F;
                 $luminance = (0.2126 * $red) + (0.7152 * $green) + (0.0722 * $blue);
 
-                // The Mapbox style is intentionally dark; this preserves its
-                // light roads and geographic details as phosphor-green pixels.
-                if ($alpha < 110 && $luminance >= 112.0) {
+                // El estilo es oscuro: se preservan las vías y detalles con
+                // contraste alto como píxeles de fósforo verde.
+                if ($alpha < 110 && $luminance >= $umbral) {
                     $packedByte |= 1 << (7 - ($x % 8));
                 }
 
