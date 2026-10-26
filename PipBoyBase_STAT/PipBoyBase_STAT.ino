@@ -67,6 +67,10 @@ constexpr int HEADER_MARCO_Y = 11;
 constexpr int HEADER_BASE_TEXTO_Y = 21;
 constexpr uint8_t PESTANA_STAT = 0;
 constexpr uint8_t PESTANA_DATA = 2;
+constexpr int DATA_RELOJ_CENTRO_X = 160;
+constexpr int DATA_RELOJ_LINEA_BASE = 154;
+constexpr int DATA_RELOJ_ESCALA = 3;
+constexpr uint32_t DATA_RELOJ_PARPADEO_MS = 500;
 constexpr int CENTROS_PESTANA[] = {64, 110, 154, 201, 251};
 constexpr int INICIO_TOQUE_PESTANA[] = {44, 88, 132, 180, 224};
 constexpr int FIN_TOQUE_PESTANA[] = {87, 131, 179, 223, 277};
@@ -167,6 +171,8 @@ uint8_t progresoFooterDibujado = 0;
 uint8_t bateriaFooterDibujada = 0;
 uint8_t horaDataDibujada = 255;
 uint8_t minutoDataDibujado = 255;
+bool dosPuntosDataVisibles = true;
+uint32_t ultimoParpadeoDataMs = 0;
 #if PIPBOY_BOTON_BOOT_HABILITADO
 bool lecturaBotonBootAnterior = false;
 bool botonBootEstable = false;
@@ -980,16 +986,19 @@ void dibujarHoraGrandeData(const FechaHora &fecha, bool limpiarAnterior) {
 
   pantalla.setTextColor(VERDE_PIPBOY);
   seleccionarFuentePipBoy(TamanoTextoPipBoy::Principal);
-  pantalla.setTextSize(3);
+  pantalla.setTextSize(DATA_RELOJ_ESCALA);
   int16_t x1, y1;
   uint16_t ancho, alto;
   pantalla.getTextBounds(horaTexto, 0, 0, &x1, &y1, &ancho, &alto);
-  pantalla.setCursor(160 - (ancho / 2), 154);
+  pantalla.setCursor(DATA_RELOJ_CENTRO_X - (ancho / 2),
+                    DATA_RELOJ_LINEA_BASE);
   pantalla.print(horaTexto);
   seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);
 
   horaDataDibujada = fecha.hora;
   minutoDataDibujado = fecha.minuto;
+  dosPuntosDataVisibles = true;
+  ultimoParpadeoDataMs = millis();
 }
 
 void dibujarData() {
@@ -1004,10 +1013,27 @@ void actualizarRelojData() {
   if (pestanaActual != PESTANA_DATA) return;
 
   const FechaHora fecha = obtenerFechaHoraPrueba();
-  if (fecha.hora == horaDataDibujada && fecha.minuto == minutoDataDibujado) {
-    return;
+  if (fecha.hora != horaDataDibujada || fecha.minuto != minutoDataDibujado) {
+    dibujarHoraGrandeData(fecha, true);
   }
-  dibujarHoraGrandeData(fecha, true);
+
+  const uint32_t ahora = millis();
+  if (ahora - ultimoParpadeoDataMs < DATA_RELOJ_PARPADEO_MS) return;
+
+  // "HH:MM" ocupa 180 px con la fuente principal a escala 3. El separador
+  // empieza tras los dos primeros digitos, por lo que se actualiza aislado.
+  const int xDosPuntos = DATA_RELOJ_CENTRO_X - 90 + 72;
+  pantalla.fillRect(xDosPuntos, 100, 36, 60, ST77XX_BLACK);
+  dosPuntosDataVisibles = !dosPuntosDataVisibles;
+  if (dosPuntosDataVisibles) {
+    pantalla.setTextColor(VERDE_PIPBOY);
+    seleccionarFuentePipBoy(TamanoTextoPipBoy::Principal);
+    pantalla.setTextSize(DATA_RELOJ_ESCALA);
+    pantalla.setCursor(xDosPuntos, DATA_RELOJ_LINEA_BASE);
+    pantalla.print(':');
+    seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);
+  }
+  ultimoParpadeoDataMs = ahora;
 }
 
 void dibujarStat() {
