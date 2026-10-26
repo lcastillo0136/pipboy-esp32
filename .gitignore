@@ -5,3 +5,6 @@ build/
 .codex-remote-attachments/
 tools/.font-tools/
 tools/.pip-cache/
+# Credenciales locales de Wi-Fi y la clave privada del dispositivo. Nunca se
+# versionan: el ejemplo junto al sketch documenta los campos necesarios.
+/PipBoyBase_STAT/PipBoySecrets.h

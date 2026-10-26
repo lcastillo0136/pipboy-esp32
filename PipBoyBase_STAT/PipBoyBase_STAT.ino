@@ -2,6 +2,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <AnimatedGIF.h>
+#include "PipboyMapClient.h"
 
 // 0: navegacion exclusiva por controles externos (valor predeterminado).
 // 1: habilita el XPT2046 y la navegacion por toque.
@@ -23,6 +24,35 @@
 #include "fonts/PipBoyFont24px7b.h"
 #include "reference_pipboy_gif.h"
 #include "reference_pipboy_thumbsup_gif.h"
+
+// PipBoySecrets.h es local e ignorado por Git. Sin ese archivo el sketch
+// compila, pero MAP indica claramente que faltan las credenciales.
+#if defined(__has_include)
+#if __has_include("PipBoySecrets.h")
+#include "PipBoySecrets.h"
+#endif
+#endif
+#ifndef PIPBOY_WIFI_SSID
+#define PIPBOY_WIFI_SSID ""
+#endif
+#ifndef PIPBOY_WIFI_PASSWORD
+#define PIPBOY_WIFI_PASSWORD ""
+#endif
+#ifndef PIPBOY_MAP_API_URL
+#define PIPBOY_MAP_API_URL "https://pipboy.onix-software.com/map.php"
+#endif
+#ifndef PIPBOY_MAP_API_KEY
+#define PIPBOY_MAP_API_KEY ""
+#endif
+#ifndef PIPBOY_MAP_LATITUD_PRUEBA
+#define PIPBOY_MAP_LATITUD_PRUEBA 19.432600f
+#endif
+#ifndef PIPBOY_MAP_LONGITUD_PRUEBA
+#define PIPBOY_MAP_LONGITUD_PRUEBA -99.133200f
+#endif
+#ifndef PIPBOY_MAP_ZOOM_PRUEBA
+#define PIPBOY_MAP_ZOOM_PRUEBA 15
+#endif
 
 // Configuracion de hardware confirmada para ESP32-2432S028R de dos USB.
 constexpr int TFT_SCLK = 14;
@@ -67,6 +97,7 @@ constexpr int HEADER_MARCO_Y = 11;
 constexpr int HEADER_BASE_TEXTO_Y = 21;
 constexpr uint8_t PESTANA_STAT = 0;
 constexpr uint8_t PESTANA_DATA = 2;
+constexpr uint8_t PESTANA_MAP = 3;
 constexpr int DATA_RELOJ_CENTRO_X = 160;
 constexpr int DATA_RELOJ_LINEA_BASE = 154;
 constexpr int DATA_RELOJ_ESCALA = 3;
@@ -129,6 +160,34 @@ constexpr ConfiguracionPerfil PERFIL_PRUEBA = {1991, 1, 7, 87};
 constexpr FechaHora FECHA_HORA_PRUEBA = {2026, 10, 26, 12, 0, 0};
 constexpr uint32_t FOOTER_INTERVALO_ACTUALIZACION_MS = 1000;
 
+// El mapa ocupa 2.4 KB a 1 bit. Se descarga en segundo plano y se dibuja en
+// verde desde este buffer, sin decodificadores PNG/JPEG ni framebuffer.
+constexpr int MAPA_X = (320 - PipboyMapClient::ANCHO_MAPA) / 2;
+constexpr int MAPA_Y = 56;
+constexpr int MAPA_MARCO_X = MAPA_X - 2;
+constexpr int MAPA_MARCO_Y = MAPA_Y - 2;
+constexpr int MAPA_MARCO_ANCHO = PipboyMapClient::ANCHO_MAPA + 4;
+constexpr int MAPA_MARCO_ALTO = PipboyMapClient::ALTO_MAPA + 4;
+constexpr int MAPA_CENTRO_X = MAPA_X + (PipboyMapClient::ANCHO_MAPA / 2);
+constexpr int MAPA_CENTRO_Y = MAPA_Y + (PipboyMapClient::ALTO_MAPA / 2);
+constexpr uint32_t MAPA_INTERVALO_ACTUALIZACION_MS = 10UL * 60UL * 1000UL;
+constexpr uint32_t MAPA_TIMEOUT_WIFI_MS = 15000;
+constexpr uint32_t MAPA_TIMEOUT_HTTP_MS = 10000;
+constexpr uint32_t MAPA_REINTENTO_MS = 30000;
+
+const PipboyMapClient::Configuracion CONFIGURACION_MAPA = {
+    PIPBOY_WIFI_SSID,
+    PIPBOY_WIFI_PASSWORD,
+    PIPBOY_MAP_API_URL,
+    PIPBOY_MAP_API_KEY,
+    PipboyMapClient::certificadoRaizLetsEncrypt(),
+    MAPA_INTERVALO_ACTUALIZACION_MS,
+    MAPA_TIMEOUT_WIFI_MS,
+    MAPA_TIMEOUT_HTTP_MS,
+    MAPA_REINTENTO_MS,
+    true,
+};
+
 SPIClass pantallaSPI(HSPI);
 #if PIPBOY_TOUCH_HABILITADO
 SPIClass touchSPI(VSPI);
@@ -140,6 +199,7 @@ XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
 // Un solo decodificador se reutiliza: primero para el arranque y despues
 // para STAT. Asi no se duplica el buffer de trabajo en RAM.
 AnimatedGIF reproductorGif;
+PipboyMapClient clienteMapa;
 
 const char *pestanas[] = {"STAT", "INV", "DATA", "MAP", "RADIO"};
 int pestanaActual = 0;
@@ -173,6 +233,7 @@ uint8_t horaDataDibujada = 255;
 uint8_t minutoDataDibujado = 255;
 bool dosPuntosDataVisibles = true;
 uint32_t ultimoParpadeoDataMs = 0;
+uint8_t estadoMapaDibujado = 255;
 #if PIPBOY_BOTON_BOOT_HABILITADO
 bool lecturaBotonBootAnterior = false;
 bool botonBootEstable = false;
@@ -1054,6 +1115,80 @@ void dibujarStat() {
   reiniciarAnimacionStat = true;
 }
 
+void dibujarMarcoMapa() {
+  pantalla.drawRect(MAPA_MARCO_X, MAPA_MARCO_Y, MAPA_MARCO_ANCHO,
+                    MAPA_MARCO_ALTO, VERDE_PIPBOY);
+  pantalla.drawRect(MAPA_MARCO_X - 2, MAPA_MARCO_Y - 2,
+                    MAPA_MARCO_ANCHO + 4, MAPA_MARCO_ALTO + 4,
+                    VERDE_OSCURO);
+}
+
+void dibujarCruzMapa() {
+  pantalla.drawFastHLine(MAPA_CENTRO_X - 7, MAPA_CENTRO_Y, 15,
+                         VERDE_BRILLO);
+  pantalla.drawFastVLine(MAPA_CENTRO_X, MAPA_CENTRO_Y - 7, 15,
+                         VERDE_BRILLO);
+  pantalla.drawRect(MAPA_CENTRO_X - 2, MAPA_CENTRO_Y - 2, 5, 5,
+                    VERDE_PIPBOY);
+}
+
+void dibujarBitmapMapa() {
+  pantalla.fillRect(MAPA_X, MAPA_Y, PipboyMapClient::ANCHO_MAPA,
+                    PipboyMapClient::ALTO_MAPA, ST77XX_BLACK);
+  const uint8_t *bitmap = clienteMapa.bitmap();
+  if (bitmap != nullptr) {
+    pantalla.drawBitmap(MAPA_X, MAPA_Y, bitmap, PipboyMapClient::ANCHO_MAPA,
+                        PipboyMapClient::ALTO_MAPA, VERDE_PIPBOY);
+    dibujarCruzMapa();
+  }
+  dibujarMarcoMapa();
+}
+
+void dibujarEstadoMapa() {
+  pantalla.fillRect(4, 182, 312, 43, ST77XX_BLACK);
+  pantalla.setTextColor(VERDE_ATENUADO);
+  escribirTextoPipBoyCentrado("COORD. PRUEBA / Z15", 160, 198,
+                              TamanoTextoPipBoy::Normal);
+  pantalla.setTextColor(VERDE_PIPBOY);
+  escribirTextoPipBoyCentrado(clienteMapa.textoEstado(), 160, 218,
+                              TamanoTextoPipBoy::Normal);
+  estadoMapaDibujado = static_cast<uint8_t>(clienteMapa.estado());
+}
+
+void dibujarMapa() {
+  pantalla.setTextColor(VERDE_PIPBOY);
+  escribirTextoPipBoyCentrado("LOCAL MAP", 160, 47,
+                              TamanoTextoPipBoy::Normal);
+  if (clienteMapa.hayMapaDisponible()) {
+    dibujarBitmapMapa();
+  } else {
+    pantalla.fillRect(MAPA_X, MAPA_Y, PipboyMapClient::ANCHO_MAPA,
+                      PipboyMapClient::ALTO_MAPA, ST77XX_BLACK);
+    dibujarMarcoMapa();
+  }
+
+  clienteMapa.solicitarActualizacion(PIPBOY_MAP_LATITUD_PRUEBA,
+                                     PIPBOY_MAP_LONGITUD_PRUEBA,
+                                     PIPBOY_MAP_ZOOM_PRUEBA);
+  dibujarEstadoMapa();
+}
+
+void actualizarMapa() {
+  if (pestanaActual != PESTANA_MAP) return;
+
+  clienteMapa.actualizar();
+  if (clienteMapa.hayMapaNuevo()) {
+    dibujarBitmapMapa();
+    clienteMapa.confirmarMapaDibujado();
+    dibujarEstadoMapa();
+    return;
+  }
+
+  if (estadoMapaDibujado != static_cast<uint8_t>(clienteMapa.estado())) {
+    dibujarEstadoMapa();
+  }
+}
+
 void dibujarContenido() {
   pantalla.fillRect(0, HEADER_ALTO, 320, 216 - HEADER_ALTO, ST77XX_BLACK);
   if (pestanaActual == PESTANA_STAT) {
@@ -1063,6 +1198,11 @@ void dibujarContenido() {
 
   if (pestanaActual == PESTANA_DATA) {
     dibujarData();
+    return;
+  }
+
+  if (pestanaActual == PESTANA_MAP) {
+    dibujarMapa();
     return;
   }
 
@@ -1181,6 +1321,7 @@ void setup() {
   pantalla.init(240, 320);
   pantalla.setRotation(3);
   pantalla.invertDisplay(false);
+  clienteMapa.iniciar(CONFIGURACION_MAPA);
 
 #if PIPBOY_TOUCH_HABILITADO
   touchSPI.begin(TOUCH_SCLK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
@@ -1209,4 +1350,5 @@ void loop() {
   actualizarRelojData();
   actualizarIconoTerminal();
   actualizarBarraInferior();
+  actualizarMapa();
 }

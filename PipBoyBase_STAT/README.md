@@ -2,6 +2,16 @@
 
 Sketch para Arduino IDE de la pantalla `STAT` de la ESP32-2432S028R.
 
+## Partición de flash
+
+`partitions.csv` aprovecha los 4 MB confirmados de la placa: reserva 3 MB
+para el programa y el espacio restante para SPIFFS. No ofrece actualización
+OTA; el flujo del proyecto sigue siendo cargar por USB desde Arduino IDE.
+
+En Arduino IDE selecciona una sola vez **Herramientas > Partition Scheme >
+Huge APP (3MB No OTA/1MB SPIFFS)** antes de compilar. Esa opción habilita el
+límite de 3 MB; el archivo de este sketch conserva la misma distribución.
+
 ## Navegacion
 
 El touch esta desactivado de forma predeterminada para que la navegacion se
@@ -32,6 +42,29 @@ control, define `PIPBOY_BOTON_BOOT_HABILITADO` como `0` antes de compilar.
 La pestaña `DATA` muestra la hora actual en formato grande. En esa pestaña el
 footer conserva fecha, nivel y batería, pero oculta la hora duplicada. El reloj
 central se redibuja únicamente cuando cambia el minuto.
+
+### MAP: cliente HTTPS
+
+`MAP` descarga un bitmap monocromo `PBM1` de `160×120` desde
+`https://pipboy.onix-software.com/map.php`. La descarga se ejecuta en una tarea
+de FreeRTOS del núcleo 0; el `loop()` conserva el touch, la navegación y las
+animaciones sin bloquearse. El buffer ocupa 2,412 bytes, incluida la cabecera,
+y se dibuja directamente en verde con `drawBitmap()`.
+
+La conexión valida TLS contra `ISRG Root X1` (Let's Encrypt). No usa
+`setInsecure()` ni requiere bibliotecas externas.
+
+Antes de cargar el sketch:
+
+1. Copia `PipBoySecrets.example.h` como `PipBoySecrets.h`.
+2. Completa el SSID y contraseña Wi-Fi.
+3. Copia `device_api_key` desde `server/pipboy-map-api/config.php` a
+   `PIPBOY_MAP_API_KEY`. No uses el token público de Mapbox en el dispositivo.
+4. No añadas `PipBoySecrets.h` al repositorio: está excluido por `.gitignore`.
+
+Mientras no haya GPS, la pantalla declara `COORD. PRUEBA / Z15` y usa las
+coordenadas de prueba configuradas en ese archivo. El futuro módulo GPS debe
+invocar `solicitarActualizacion(latitud, longitud, zoom)` con datos reales.
 
 ## Dependencia adicional
 

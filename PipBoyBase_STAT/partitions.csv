@@ -1,0 +1,9 @@
+# Particion para la ESP32-2432S028R con flash de 4 MB.
+# Reserva 3 MB para firmware y espacio restante para SPIFFS. No contiene OTA: el
+# proyecto se actualiza por USB desde Arduino IDE, como se ha validado.
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x300000,
+spiffs,   data, spiffs,  0x310000, 0xE0000,
+coredump, data, coredump,0x3F0000, 0x10000,
