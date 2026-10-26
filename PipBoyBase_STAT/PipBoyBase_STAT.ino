@@ -72,17 +72,17 @@ constexpr int ARRANQUE_GIF_X = (320 - ARRANQUE_GIF_ANCHO) / 2;
 constexpr int ARRANQUE_GIF_Y = (240 - ARRANQUE_GIF_ALTO) / 2;
 constexpr uint32_t ARRANQUE_GIF_INTERVALO_MINIMO_MS = 30;
 
-// Iconos monocromos para los dos bloques laterales de la cabecera.
-constexpr uint8_t ICONO_ESTADO[] PROGMEM = {
-  0b00111100,
-  0b01111110,
-  0b11100111,
-  0b11011011,
-  0b11011011,
-  0b11100111,
-  0b01111110,
-  0b00111100,
-};
+// Consola de prearranque. Usa una microfuente 3 x 5 px para conservar la
+// legibilidad sin ocupar demasiado espacio de la pantalla fisica.
+constexpr int CONSOLA_MARGEN_X = 4;
+constexpr int CONSOLA_MARGEN_Y = 4;
+constexpr int CONSOLA_ANCHO_CARACTER = 4;
+constexpr int CONSOLA_ALTO_CARACTER = 6;
+constexpr int CONSOLA_COLUMNAS = 78;
+constexpr int CONSOLA_FILAS = 38;
+constexpr uint32_t CONSOLA_INTERVALO_CARACTER_MS = 5;
+constexpr uint32_t CONSOLA_PAUSA_LINEA_MS = 20;
+constexpr uint32_t CONSOLA_PAUSA_FINAL_MS = 800;
 
 SPIClass pantallaSPI(HSPI);
 #if PIPBOY_TOUCH_HABILITADO
@@ -107,8 +107,96 @@ uint32_t siguienteCuadroGifStat = 0;
 bool animacionArranqueActiva = false;
 bool ultimoCuadroArranqueMostrado = false;
 uint32_t siguienteCuadroGifArranque = 0;
+enum class EstadoArranque : uint8_t { Consola, PausaAntesGif, Gif };
+EstadoArranque estadoArranque = EstadoArranque::Consola;
+char consolaArranque[CONSOLA_FILAS][CONSOLA_COLUMNAS];
+uint8_t filaConsola = 0;
+uint8_t columnaConsola = 0;
+uint8_t lineaTextoArranque = 0;
+uint8_t caracterTextoArranque = 0;
+uint32_t siguienteCaracterConsola = 0;
 uint32_t ultimoFrameIconoTerminal = 0;
 uint8_t faseIconoTerminal = 0;
+
+const char *const TEXTO_ARRANQUE[] = {
+  "LOADER V1.1",
+  "EXEC VERSION 41.10",
+  "64k RAM SYSTEM",
+  "38911 BYTES FREE",
+  "NO WILDTAPE FOUND",
+  "LOAD ROM(1): DEUTRIX 303",
+  "* 1 0 0x00000A 0x0000000000000000 start memory discovery",
+  "1 0 0x000014 0x0000000000000000 CPU0 starting cell relocation0",
+  "1 0 0x000009 0x0000000000000000 CPU0 launch EFI0 0x000004",
+  "1 0 0x000009 0x0000000000E003D CPU0 starting EFI0 0x000004",
+  "1 0 0x000004 0x0000000000000000 start memory discovery 0x000004",
+  "1 0 0x000004 0x0000000000000000 start memory discovery 0",
+  "1 0 0x000014 0x0000000000000000 CPU0 starting cell relocation0",
+  "1 0 0x000009 0x0000000000000000 CPU0 launch EFI0",
+  "1 0 0x000009 0x0000000000E003D CPU0 starting EFI0",
+  "1 0 0x000009 0x0000000000000000 start memory discovery0",
+  "1 0 0x000009 0x0000000000000000 start memory discovery 0",
+  "1 0 0x000014 0x0000000000000000 CPU0 starting cell relocation0",
+  "1 0 0x000014 0x0000000000000000 CPU0 launch EFI0",
+  "1 0 0x000014 0x0000000000000000 CPU0 starting EFI0",
+  "1 0 0x000009 0x0000000000E003D CPU0 starting EFI0",
+  "",
+  "JIFFY INITIALIZATION",
+  "MEASURING OFFSETS",
+  "FILE SYSTEM CHECK",
+  "",
+  "PLEASE STAND BY...",
+};
+constexpr uint8_t TOTAL_LINEAS_TEXTO_ARRANQUE =
+    sizeof(TEXTO_ARRANQUE) / sizeof(TEXTO_ARRANQUE[0]);
+
+// A-Z, 0-9, punto, dos puntos, parentesis, asterisco, guion y espacio.
+// Cada fila usa los tres bits menos significativos.
+const uint8_t FUENTE_MICRO[][5] PROGMEM = {
+  {0b111, 0b101, 0b111, 0b101, 0b101}, // A
+  {0b110, 0b101, 0b110, 0b101, 0b110}, // B
+  {0b111, 0b100, 0b100, 0b100, 0b111}, // C
+  {0b110, 0b101, 0b101, 0b101, 0b110}, // D
+  {0b111, 0b100, 0b110, 0b100, 0b111}, // E
+  {0b111, 0b100, 0b110, 0b100, 0b100}, // F
+  {0b111, 0b100, 0b101, 0b101, 0b111}, // G
+  {0b101, 0b101, 0b111, 0b101, 0b101}, // H
+  {0b111, 0b010, 0b010, 0b010, 0b111}, // I
+  {0b001, 0b001, 0b001, 0b101, 0b010}, // J
+  {0b101, 0b101, 0b110, 0b101, 0b101}, // K
+  {0b100, 0b100, 0b100, 0b100, 0b111}, // L
+  {0b101, 0b111, 0b111, 0b101, 0b101}, // M
+  {0b101, 0b111, 0b111, 0b111, 0b101}, // N
+  {0b111, 0b101, 0b101, 0b101, 0b111}, // O
+  {0b110, 0b101, 0b110, 0b100, 0b100}, // P
+  {0b111, 0b101, 0b101, 0b111, 0b001}, // Q
+  {0b110, 0b101, 0b110, 0b101, 0b101}, // R
+  {0b111, 0b100, 0b111, 0b001, 0b111}, // S
+  {0b111, 0b010, 0b010, 0b010, 0b010}, // T
+  {0b101, 0b101, 0b101, 0b101, 0b111}, // U
+  {0b101, 0b101, 0b101, 0b101, 0b010}, // V
+  {0b101, 0b101, 0b111, 0b111, 0b101}, // W
+  {0b101, 0b101, 0b010, 0b101, 0b101}, // X
+  {0b101, 0b101, 0b010, 0b010, 0b010}, // Y
+  {0b111, 0b001, 0b010, 0b100, 0b111}, // Z
+  {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
+  {0b010, 0b110, 0b010, 0b010, 0b111}, // 1
+  {0b110, 0b001, 0b111, 0b100, 0b111}, // 2
+  {0b110, 0b001, 0b011, 0b001, 0b110}, // 3
+  {0b101, 0b101, 0b111, 0b001, 0b001}, // 4
+  {0b111, 0b100, 0b111, 0b001, 0b111}, // 5
+  {0b111, 0b100, 0b111, 0b101, 0b111}, // 6
+  {0b111, 0b001, 0b010, 0b010, 0b010}, // 7
+  {0b111, 0b101, 0b111, 0b101, 0b111}, // 8
+  {0b111, 0b101, 0b111, 0b001, 0b111}, // 9
+  {0b000, 0b000, 0b000, 0b000, 0b010}, // .
+  {0b000, 0b010, 0b000, 0b010, 0b000}, // :
+  {0b011, 0b100, 0b100, 0b100, 0b011}, // (
+  {0b110, 0b001, 0b001, 0b001, 0b110}, // )
+  {0b000, 0b101, 0b010, 0b101, 0b000}, // *
+  {0b000, 0b000, 0b111, 0b000, 0b000}, // -
+  {0b000, 0b000, 0b000, 0b000, 0b000}, // espacio
+};
 
 // Se declara antes de la secuencia de arranque, que entra a la UI al acabar.
 void dibujarPantalla();
@@ -251,22 +339,116 @@ void inicializarAnimacionStat() {
   }
 }
 
-bool iniciarAnimacionArranque() {
+int8_t indiceGlifoMicro(char caracter) {
+  if (caracter >= 'a' && caracter <= 'z') caracter -= 'a' - 'A';
+  if (caracter >= 'A' && caracter <= 'Z') return caracter - 'A';
+  if (caracter >= '0' && caracter <= '9') return 26 + caracter - '0';
+
+  switch (caracter) {
+    case '.': return 36;
+    case ':': return 37;
+    case '(': return 38;
+    case ')': return 39;
+    case '*': return 40;
+    case '-': return 41;
+    case ' ': return 42;
+    default: return -1;
+  }
+}
+
+void dibujarCaracterConsolaMicro(int columna, int fila, char caracter) {
+  const int8_t indice = indiceGlifoMicro(caracter);
+  if (indice < 0 || caracter == ' ') return;
+
+  const int x = CONSOLA_MARGEN_X + columna * CONSOLA_ANCHO_CARACTER;
+  const int y = CONSOLA_MARGEN_Y + fila * CONSOLA_ALTO_CARACTER;
+  for (int filaGlifo = 0; filaGlifo < 5; filaGlifo++) {
+    const uint8_t bits = pgm_read_byte(&FUENTE_MICRO[indice][filaGlifo]);
+    for (int columnaGlifo = 0; columnaGlifo < 3; columnaGlifo++) {
+      if (bits & (1 << (2 - columnaGlifo))) {
+        pantalla.drawPixel(x + columnaGlifo, y + filaGlifo, VERDE_PIPBOY);
+      }
+    }
+  }
+}
+
+void limpiarConsolaArranque() {
+  pantalla.fillScreen(ST77XX_BLACK);
+
+  for (int fila = 0; fila < CONSOLA_FILAS; fila++) {
+    for (int columna = 0; columna < CONSOLA_COLUMNAS; columna++) {
+      consolaArranque[fila][columna] = ' ';
+    }
+  }
+}
+
+void redibujarConsolaArranque() {
+  pantalla.fillScreen(ST77XX_BLACK);
+
+  for (int fila = 0; fila < CONSOLA_FILAS; fila++) {
+    for (int columna = 0; columna < CONSOLA_COLUMNAS; columna++) {
+      dibujarCaracterConsolaMicro(columna, fila,
+                                  consolaArranque[fila][columna]);
+    }
+  }
+}
+
+void avanzarLineaConsolaArranque() {
+  columnaConsola = 0;
+  if (filaConsola < CONSOLA_FILAS - 1) {
+    filaConsola++;
+    return;
+  }
+
+  for (int fila = 0; fila < CONSOLA_FILAS - 1; fila++) {
+    for (int columna = 0; columna < CONSOLA_COLUMNAS; columna++) {
+      consolaArranque[fila][columna] = consolaArranque[fila + 1][columna];
+    }
+  }
+  for (int columna = 0; columna < CONSOLA_COLUMNAS; columna++) {
+    consolaArranque[CONSOLA_FILAS - 1][columna] = ' ';
+  }
+  redibujarConsolaArranque();
+}
+
+void escribirCaracterConsolaArranque(char caracter) {
+  if (columnaConsola >= CONSOLA_COLUMNAS) {
+    avanzarLineaConsolaArranque();
+  }
+
+  consolaArranque[filaConsola][columnaConsola] = caracter;
+  dibujarCaracterConsolaMicro(columnaConsola, filaConsola, caracter);
+  columnaConsola++;
+}
+
+bool iniciarGifArranque() {
   reproductorGif.begin(GIF_PALETTE_RGB565_BE);
-  animacionArranqueActiva = reproductorGif.openFLASH(
+  const bool gifAbierto = reproductorGif.openFLASH(
       const_cast<uint8_t *>(referencePipboyThumbsupGif),
       referencePipboyThumbsupGifSize, dibujarLineaGifArranque);
   ultimoCuadroArranqueMostrado = false;
   siguienteCuadroGifArranque = 0;
 
-  if (animacionArranqueActiva) {
+  if (gifAbierto) {
     pantalla.fillScreen(ST77XX_BLACK);
+    estadoArranque = EstadoArranque::Gif;
   } else {
     Serial.printf("No se pudo abrir el GIF de arranque (error %d)\n",
                   reproductorGif.getLastError());
   }
+  return gifAbierto;
+}
 
-  return animacionArranqueActiva;
+bool iniciarAnimacionArranque() {
+  animacionArranqueActiva = true;
+  estadoArranque = EstadoArranque::Consola;
+  filaConsola = 0;
+  columnaConsola = 0;
+  lineaTextoArranque = 0;
+  caracterTextoArranque = 0;
+  siguienteCaracterConsola = 0;
+  limpiarConsolaArranque();
+  return true;
 }
 
 void terminarAnimacionArranque() {
@@ -280,6 +462,40 @@ void actualizarAnimacionArranque() {
   if (!animacionArranqueActiva) return;
 
   const uint32_t ahora = millis();
+
+  if (estadoArranque == EstadoArranque::Consola) {
+    if (static_cast<int32_t>(ahora - siguienteCaracterConsola) < 0) return;
+
+    const char *linea = TEXTO_ARRANQUE[lineaTextoArranque];
+    const char caracter = linea[caracterTextoArranque];
+    if (caracter != '\0') {
+      escribirCaracterConsolaArranque(caracter);
+      caracterTextoArranque++;
+      siguienteCaracterConsola = ahora + CONSOLA_INTERVALO_CARACTER_MS;
+      return;
+    }
+
+    if (lineaTextoArranque + 1 >= TOTAL_LINEAS_TEXTO_ARRANQUE) {
+      estadoArranque = EstadoArranque::PausaAntesGif;
+      siguienteCaracterConsola = ahora + CONSOLA_PAUSA_FINAL_MS;
+      return;
+    }
+
+    avanzarLineaConsolaArranque();
+    lineaTextoArranque++;
+    caracterTextoArranque = 0;
+    siguienteCaracterConsola = ahora + CONSOLA_PAUSA_LINEA_MS;
+    return;
+  }
+
+  if (estadoArranque == EstadoArranque::PausaAntesGif) {
+    if (static_cast<int32_t>(ahora - siguienteCaracterConsola) < 0) return;
+    if (!iniciarGifArranque()) {
+      terminarAnimacionArranque();
+    }
+    return;
+  }
+
   if (static_cast<int32_t>(ahora - siguienteCuadroGifArranque) < 0) return;
 
   // El ultimo cuadro conserva su retraso antes de limpiar la pantalla y
@@ -324,6 +540,48 @@ void actualizarAnimacionStat() {
   siguienteCuadroGifStat = ahora + retrasoGifMs;
 }
 
+// Adaptacion compacta del engrane: fondo oscuro, doble marco, cuerpo solido
+// y un brillo que recorre sus ocho dientes.
+void dibujarIconoEngrane(uint8_t fase) {
+  constexpr int x = 11;
+  constexpr int y = 3;
+  constexpr int centroX = x + 8;
+  constexpr int centroY = y + 7;
+
+  pantalla.fillRect(x, y, 16, 15, ST77XX_BLACK);
+  pantalla.drawRect(x + 1, y + 1, 14, 13, VERDE_OSCURO);
+  pantalla.drawRect(x + 2, y + 2, 12, 11, VERDE_ATENUADO);
+  pantalla.fillRect(x + 3, y + 3, 10, 9, VERDE_OSCURO);
+
+  // Dientes principales y diagonales.
+  pantalla.fillRect(centroX - 1, centroY - 6, 2, 3, VERDE_PIPBOY);
+  pantalla.fillRect(centroX - 1, centroY + 4, 2, 3, VERDE_PIPBOY);
+  pantalla.fillRect(centroX - 6, centroY - 1, 3, 2, VERDE_PIPBOY);
+  pantalla.fillRect(centroX + 4, centroY - 1, 3, 2, VERDE_PIPBOY);
+  pantalla.fillRect(centroX - 4, centroY - 4, 2, 2, VERDE_PIPBOY);
+  pantalla.fillRect(centroX + 2, centroY - 4, 2, 2, VERDE_PIPBOY);
+  pantalla.fillRect(centroX - 4, centroY + 2, 2, 2, VERDE_PIPBOY);
+  pantalla.fillRect(centroX + 2, centroY + 2, 2, 2, VERDE_PIPBOY);
+
+  pantalla.fillCircle(centroX, centroY, 4, VERDE_ATENUADO);
+  pantalla.drawCircle(centroX, centroY, 4, VERDE_PIPBOY);
+  pantalla.fillCircle(centroX, centroY, 2, VERDE_OSCURO);
+  pantalla.drawCircle(centroX, centroY, 2, VERDE_PIPBOY);
+  pantalla.drawPixel(centroX, centroY, VERDE_ATENUADO);
+
+  // El brillo recorre los dientes en ocho pasos.
+  switch (fase % 8) {
+    case 0: pantalla.fillRect(centroX - 1, centroY - 6, 2, 3, VERDE_BRILLO); break;
+    case 1: pantalla.fillRect(centroX + 2, centroY - 4, 2, 2, VERDE_BRILLO); break;
+    case 2: pantalla.fillRect(centroX + 4, centroY - 1, 3, 2, VERDE_BRILLO); break;
+    case 3: pantalla.fillRect(centroX + 2, centroY + 2, 2, 2, VERDE_BRILLO); break;
+    case 4: pantalla.fillRect(centroX - 1, centroY + 4, 2, 3, VERDE_BRILLO); break;
+    case 5: pantalla.fillRect(centroX - 4, centroY + 2, 2, 2, VERDE_BRILLO); break;
+    case 6: pantalla.fillRect(centroX - 6, centroY - 1, 3, 2, VERDE_BRILLO); break;
+    default: pantalla.fillRect(centroX - 4, centroY - 4, 2, 2, VERDE_BRILLO); break;
+  }
+}
+
 // Version compacta del icono de monitor: conserva marco, terminal, pulso y
 // linea de escaneo dentro del bloque disponible de 16 x 15 px de la cabecera.
 void dibujarIconoTerminal(uint8_t fase) {
@@ -362,15 +620,14 @@ void actualizarIconoTerminal() {
 
   ultimoFrameIconoTerminal = ahora;
   faseIconoTerminal = (faseIconoTerminal + 1) % 14;
+  dibujarIconoEngrane(faseIconoTerminal);
   dibujarIconoTerminal(faseIconoTerminal);
 }
 
 void dibujarPestanas() {
   pantalla.fillRect(0, 0, 320, HEADER_ALTO, ST77XX_BLACK);
 
-  // Bloques verdes laterales con sus pictogramas oscuros.
-  pantalla.fillRect(11, 3, 16, 15, VERDE_PIPBOY);
-  pantalla.drawBitmap(15, 6, ICONO_ESTADO, 8, 8, ST77XX_BLACK);
+  dibujarIconoEngrane(faseIconoTerminal);
   dibujarIconoTerminal(faseIconoTerminal);
 
   seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);

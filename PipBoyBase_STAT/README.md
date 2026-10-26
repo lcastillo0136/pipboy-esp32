@@ -39,7 +39,9 @@ inferior para las barras HP/AP y el estado permanente.
 
 ## Animacion de arranque
 
-`reference-pipboy-thumbsup.gif` se muestra centrado una sola vez al iniciar
-(15 cuadros, aproximadamente 1.5 s); despues se entra directamente en
-`STAT`. Se embebe en flash como `reference_pipboy_thumbsup_gif.h` y se
-regenera con el mismo script, usando el simbolo `referencePipboyThumbsupGif`.
+Al iniciar, una consola verde escribe el registro de carga carácter a carácter.
+Después de una pausa de 800 ms tras `PLEASE STAND BY...`,
+`reference-pipboy-thumbsup.gif` se muestra centrado una sola vez (15 cuadros,
+aproximadamente 1.5 s) y después se entra directamente en `STAT`. El GIF se
+embebe en flash como `reference_pipboy_thumbsup_gif.h` y se regenera con el
+mismo script, usando el simbolo `referencePipboyThumbsupGif`.
