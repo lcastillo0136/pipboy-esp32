@@ -1,0 +1,173 @@
+{
+  "version": 8,
+  "name": "Pip-Boy Minimal",
+  "metadata": {
+    "mapbox:autocomposite": true,
+    "pipboy:purpose": "static-map-no-labels"
+  },
+  "sources": {
+    "streets": {
+      "type": "vector",
+      "url": "mapbox://mapbox.mapbox-streets-v8"
+    }
+  },
+  "layers": [
+    {
+      "id": "pipboy-background",
+      "type": "background",
+      "paint": {
+        "background-color": "#020702"
+      }
+    },
+    {
+      "id": "pipboy-waterways",
+      "type": "line",
+      "source": "streets",
+      "source-layer": "waterway",
+      "minzoom": 7,
+      "paint": {
+        "line-color": "#123d1a",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          7, 0.4,
+          14, 1.0,
+          18, 2.0
+        ]
+      }
+    },
+    {
+      "id": "pipboy-water",
+      "type": "fill",
+      "source": "streets",
+      "source-layer": "water",
+      "paint": {
+        "fill-color": "#071608"
+      }
+    },
+    {
+      "id": "pipboy-landuse",
+      "type": "fill",
+      "source": "streets",
+      "source-layer": "landuse",
+      "minzoom": 8,
+      "paint": {
+        "fill-color": "#071007",
+        "fill-opacity": 0.7
+      }
+    },
+    {
+      "id": "pipboy-boundaries",
+      "type": "line",
+      "source": "streets",
+      "source-layer": "admin",
+      "minzoom": 5,
+      "filter": [
+        "==",
+        ["get", "maritime"],
+        "false"
+      ],
+      "paint": {
+        "line-color": "#2e6435",
+        "line-opacity": 0.65,
+        "line-width": 0.6,
+        "line-dasharray": [2, 2]
+      }
+    },
+    {
+      "id": "pipboy-roads-minor",
+      "type": "line",
+      "source": "streets",
+      "source-layer": "road",
+      "minzoom": 11,
+      "filter": [
+        "in",
+        ["get", "class"],
+        ["literal", ["street", "street_limited", "service", "track", "path", "pedestrian"]]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#4c8a56",
+        "line-opacity": 0.85,
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          11, 0.35,
+          14, 0.8,
+          18, 2.2
+        ]
+      }
+    },
+    {
+      "id": "pipboy-roads-major",
+      "type": "line",
+      "source": "streets",
+      "source-layer": "road",
+      "minzoom": 5,
+      "filter": [
+        "in",
+        ["get", "class"],
+        [
+          "literal",
+          [
+            "motorway",
+            "motorway_link",
+            "trunk",
+            "trunk_link",
+            "primary",
+            "primary_link",
+            "secondary",
+            "secondary_link",
+            "tertiary",
+            "tertiary_link"
+          ]
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#a8ffb3",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          5, 0.5,
+          10, 1.2,
+          14, 2.6,
+          18, 5.2
+        ]
+      }
+    },
+    {
+      "id": "pipboy-rail",
+      "type": "line",
+      "source": "streets",
+      "source-layer": "road",
+      "minzoom": 9,
+      "filter": [
+        "in",
+        ["get", "class"],
+        ["literal", ["major_rail", "minor_rail"]]
+      ],
+      "paint": {
+        "line-color": "#5da869",
+        "line-dasharray": [1.5, 1.5],
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          9, 0.4,
+          14, 1.1,
+          18, 2.0
+        ]
+      }
+    }
+  ]
+}
