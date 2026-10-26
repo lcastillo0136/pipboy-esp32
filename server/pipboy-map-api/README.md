@@ -37,7 +37,10 @@ datos de acceso y ejecuta desde la raíz del repositorio:
 .\tools\deploy-map-api.ps1
 ```
 
-El archivo de credenciales y `config.php` están excluidos de Git. El script
+El script también reconoce el formato existente `sftp-config.json` con los
+campos `type`, `user` y `remote_path`; usa este archivo automáticamente si no
+existe `deploy.credentials.json`. Ambos archivos de credenciales y `config.php`
+están excluidos de Git. El script
 sube solo `config.php`, `public/map.php` y `src/MapEndpoint.php`; nunca sube
 la caché ni los ejemplos. Prefiere `sftp` o `ftps`; usa `ftp` únicamente si el
 hosting no ofrece una alternativa cifrada.

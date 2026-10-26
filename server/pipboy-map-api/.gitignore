@@ -1,6 +1,7 @@
 # Secret local configuration. Copy config.example.php to config.php when deploying.
 /config.php
 /deploy.credentials.json
+/sftp-config.json
 
 # Generated static-map responses. The directory itself is kept for deployment.
 /cache/*
