@@ -49,7 +49,7 @@ microSD, después de confirmar su pinout, y la fecha/hora vendrá de RTC o NTP.
 Inventario/listas personales almacenadas localmente.
 
 ### DATA
-Hora, fecha, notas, estado del sistema y Home Assistant.
+Reloj principal, fecha, notas, estado del sistema y Home Assistant.
 
 ### MAP
 Brújula, GPS opcional, coordenadas, rumbo, altitud y puntos guardados.

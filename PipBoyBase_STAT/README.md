@@ -27,6 +27,12 @@ No mantengas BOOT presionado durante un reinicio o al encender la placa: GPIO0
 selecciona el modo de carga de firmware en ese momento. Para deshabilitar este
 control, define `PIPBOY_BOTON_BOOT_HABILITADO` como `0` antes de compilar.
 
+### DATA
+
+La pestaña `DATA` muestra la hora actual en formato grande. En esa pestaña el
+footer conserva fecha, nivel y batería, pero oculta la hora duplicada. El reloj
+central se redibuja únicamente cuando cambia el minuto.
+
 ## Dependencia adicional
 
 Instala **AnimatedGIF** de Larry Bank desde el gestor de bibliotecas de

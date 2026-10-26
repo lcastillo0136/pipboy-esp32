@@ -65,6 +65,8 @@ constexpr int HEADER_ALTO = 28;
 constexpr int HEADER_LINEA_Y = 22;
 constexpr int HEADER_MARCO_Y = 11;
 constexpr int HEADER_BASE_TEXTO_Y = 21;
+constexpr uint8_t PESTANA_STAT = 0;
+constexpr uint8_t PESTANA_DATA = 2;
 constexpr int CENTROS_PESTANA[] = {64, 110, 154, 201, 251};
 constexpr int INICIO_TOQUE_PESTANA[] = {44, 88, 132, 180, 224};
 constexpr int FIN_TOQUE_PESTANA[] = {87, 131, 179, 223, 277};
@@ -163,6 +165,8 @@ FechaHora fechaFooterDibujada = {0, 0, 0, 0, 0, 0};
 uint16_t edadFooterDibujada = 0;
 uint8_t progresoFooterDibujado = 0;
 uint8_t bateriaFooterDibujada = 0;
+uint8_t horaDataDibujada = 255;
+uint8_t minutoDataDibujado = 255;
 #if PIPBOY_BOTON_BOOT_HABILITADO
 bool lecturaBotonBootAnterior = false;
 bool botonBootEstable = false;
@@ -889,10 +893,11 @@ void dibujarBarraInferior() {
   const uint16_t edad = calcularEdad(fecha);
   const uint8_t progresoNivel = calcularProgresoNivel(fecha);
   const uint8_t bateria = PERFIL_PRUEBA.bateriaPorcentaje;
+  const bool mostrarHora = pestanaActual != PESTANA_DATA;
 
   dibujarEstructuraFooter();
   dibujarFechaFooter(fecha);
-  dibujarHoraFooter(fecha);
+  if (mostrarHora) dibujarHoraFooter(fecha);
   dibujarNivelFooter(edad, progresoNivel);
   dibujarBateriaFooter(bateria);
   seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);
@@ -916,17 +921,20 @@ void actualizarBarraInferior() {
   const uint16_t edad = calcularEdad(fecha);
   const uint8_t progresoNivel = calcularProgresoNivel(fecha);
   const uint8_t bateria = PERFIL_PRUEBA.bateriaPorcentaje;
+  const bool mostrarHora = pestanaActual != PESTANA_DATA;
+  const bool fechaCambio = fecha.anio != fechaFooterDibujada.anio ||
+                           fecha.mes != fechaFooterDibujada.mes ||
+                           fecha.dia != fechaFooterDibujada.dia;
+  const bool horaCambio = fecha.hora != fechaFooterDibujada.hora ||
+                          fecha.minuto != fechaFooterDibujada.minuto;
   bool huboCambios = false;
 
-  if (fecha.anio != fechaFooterDibujada.anio ||
-      fecha.mes != fechaFooterDibujada.mes ||
-      fecha.dia != fechaFooterDibujada.dia) {
+  if (fechaCambio) {
     dibujarFechaFooter(fecha);
     huboCambios = true;
   }
 
-  if (fecha.hora != fechaFooterDibujada.hora ||
-      fecha.minuto != fechaFooterDibujada.minuto) {
+  if (mostrarHora && horaCambio) {
     dibujarHoraFooter(fecha);
     huboCambios = true;
   }
@@ -941,10 +949,14 @@ void actualizarBarraInferior() {
     huboCambios = true;
   }
 
-  if (!huboCambios) return;
+  const bool estadoCambio = fechaCambio || horaCambio ||
+                            edad != edadFooterDibujada ||
+                            progresoNivel != progresoFooterDibujado ||
+                            bateria != bateriaFooterDibujada;
+  if (!estadoCambio) return;
 
   guardarEstadoFooter(fecha, edad, progresoNivel, bateria);
-  seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);
+  if (huboCambios) seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);
 }
 
 void dibujarBarraVital(const char *etiqueta, int x, int porcentaje) {
@@ -953,6 +965,49 @@ void dibujarBarraVital(const char *etiqueta, int x, int porcentaje) {
   pantalla.drawRect(x + 49, 201, 91, 11, VERDE_PIPBOY);
   pantalla.fillRect(x + 52, 204, (86 * porcentaje) / 100, 5,
                     VERDE_PIPBOY);
+}
+
+void dibujarHoraGrandeData(const FechaHora &fecha, bool limpiarAnterior) {
+  char horaTexto[6];
+  snprintf(horaTexto, sizeof(horaTexto), "%02u:%02u",
+           static_cast<unsigned int>(fecha.hora),
+           static_cast<unsigned int>(fecha.minuto));
+
+  if (limpiarAnterior) {
+    // Se limpia solo el area del reloj cuando cambia el minuto.
+    pantalla.fillRect(55, 82, 210, 82, ST77XX_BLACK);
+  }
+
+  pantalla.setTextColor(VERDE_PIPBOY);
+  seleccionarFuentePipBoy(TamanoTextoPipBoy::Principal);
+  pantalla.setTextSize(3);
+  int16_t x1, y1;
+  uint16_t ancho, alto;
+  pantalla.getTextBounds(horaTexto, 0, 0, &x1, &y1, &ancho, &alto);
+  pantalla.setCursor(160 - (ancho / 2), 154);
+  pantalla.print(horaTexto);
+  seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);
+
+  horaDataDibujada = fecha.hora;
+  minutoDataDibujado = fecha.minuto;
+}
+
+void dibujarData() {
+  const FechaHora fecha = obtenerFechaHoraPrueba();
+  pantalla.setTextColor(VERDE_ATENUADO);
+  escribirTextoPipBoyCentrado("CLOCK", 160, 58, TamanoTextoPipBoy::Normal);
+  pantalla.drawFastHLine(38, 68, 244, VERDE_OSCURO);
+  dibujarHoraGrandeData(fecha, false);
+}
+
+void actualizarRelojData() {
+  if (pestanaActual != PESTANA_DATA) return;
+
+  const FechaHora fecha = obtenerFechaHoraPrueba();
+  if (fecha.hora == horaDataDibujada && fecha.minuto == minutoDataDibujado) {
+    return;
+  }
+  dibujarHoraGrandeData(fecha, true);
 }
 
 void dibujarStat() {
@@ -975,8 +1030,13 @@ void dibujarStat() {
 
 void dibujarContenido() {
   pantalla.fillRect(0, HEADER_ALTO, 320, 216 - HEADER_ALTO, ST77XX_BLACK);
-  if (pestanaActual == 0) {
+  if (pestanaActual == PESTANA_STAT) {
     dibujarStat();
+    return;
+  }
+
+  if (pestanaActual == PESTANA_DATA) {
+    dibujarData();
     return;
   }
 
@@ -1120,6 +1180,7 @@ void loop() {
   revisarBotonBoot();
 #endif
   actualizarAnimacionStat();
+  actualizarRelojData();
   actualizarIconoTerminal();
   actualizarBarraInferior();
 }
