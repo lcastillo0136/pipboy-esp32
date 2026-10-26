@@ -15,6 +15,11 @@ Construir un Pip-Boy funcional usando una ESP32-2432S028R con pantalla táctil T
 9. El aspecto debe ser retro-futurista y monocromo verde, sin sacrificar usabilidad.
 10. Las funciones decorativas deben estar separadas de los datos reales.
 
+## Control de versiones
+
+- Después de cada cambio realizado en el proyecto, crear un commit en la rama
+  principal (`main`) y publicarlo en `origin/main` una vez verificado.
+
 # ESP32-2432S028R — Especificaciones confirmadas
 
 ## Placa
