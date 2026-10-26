@@ -15,6 +15,18 @@ Para habilitar el XPT2046, cambia al inicio de `PipBoyBase_STAT.ino`:
 #define PIPBOY_TOUCH_HABILITADO 1
 ```
 
+### Botón BOOT
+
+La navegación por el botón físico BOOT está habilitada de forma predeterminada
+en `GPIO0` y no bloquea la animación ni el refresco de pantalla:
+
+- Pulsación corta: pestaña siguiente.
+- Pulsación de 700 ms o más: pestaña anterior.
+
+No mantengas BOOT presionado durante un reinicio o al encender la placa: GPIO0
+selecciona el modo de carga de firmware en ese momento. Para deshabilitar este
+control, define `PIPBOY_BOTON_BOOT_HABILITADO` como `0` antes de compilar.
+
 ## Dependencia adicional
 
 Instala **AnimatedGIF** de Larry Bank desde el gestor de bibliotecas de

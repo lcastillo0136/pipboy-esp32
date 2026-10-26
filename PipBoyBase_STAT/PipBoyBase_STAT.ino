@@ -9,6 +9,13 @@
 #define PIPBOY_TOUCH_HABILITADO 0
 #endif
 
+// El boton BOOT de la ESP32-2432S028R esta conectado a GPIO0. Solo debe
+// mantenerse pulsado despues del arranque: durante RESET selecciona el modo
+// de carga de firmware.
+#ifndef PIPBOY_BOTON_BOOT_HABILITADO
+#define PIPBOY_BOTON_BOOT_HABILITADO 1
+#endif
+
 #if PIPBOY_TOUCH_HABILITADO
 #include <XPT2046_Touchscreen.h>
 #endif
@@ -24,6 +31,9 @@ constexpr int TFT_MOSI = 13;
 constexpr int TFT_CS = 15;
 constexpr int TFT_DC = 2;
 constexpr int TFT_BL = 21;
+constexpr int BOTON_BOOT_GPIO = 0;
+constexpr uint32_t BOTON_BOOT_REBOTE_MS = 35;
+constexpr uint32_t BOTON_BOOT_PULSACION_LARGA_MS = 700;
 
 constexpr int TOUCH_SCLK = 25;
 constexpr int TOUCH_MISO = 39;
@@ -36,12 +46,19 @@ constexpr int TOUCH_X_MAX = 3515;
 constexpr int TOUCH_Y_MIN = 513;
 constexpr int TOUCH_Y_MAX = 3209;
 
-// Gris RGB565 compatible con Adafruit_ST7789.
-constexpr uint16_t GRIS = 0x7BEF;
 constexpr uint16_t VERDE_PIPBOY = ST77XX_GREEN;
 constexpr uint16_t VERDE_ATENUADO = 0x03E0;
 constexpr uint16_t VERDE_OSCURO = 0x0140;
 constexpr uint16_t VERDE_BRILLO = 0xA7F3;
+// Fondo RGB565 ajustable para los paneles del footer.
+constexpr uint16_t FONDO_SECCION_FOOTER = 0x0100;
+// Franja compacta anclada al borde inferior, con 2 px arriba y abajo.
+constexpr int FOOTER_Y = 228;
+constexpr int FOOTER_ALTO = 12;
+constexpr int FOOTER_PADDING_VERTICAL = 2;
+constexpr int FOOTER_CONTENIDO_Y = FOOTER_Y + FOOTER_PADDING_VERTICAL;
+constexpr int FOOTER_CONTENIDO_ALTO = FOOTER_ALTO -
+                                      (FOOTER_PADDING_VERTICAL * 2);
 
 // Proporciones de la cabecera de referencia, adaptadas a 320 px de ancho.
 constexpr int HEADER_ALTO = 28;
@@ -80,9 +97,31 @@ constexpr int CONSOLA_ANCHO_CARACTER = 4;
 constexpr int CONSOLA_ALTO_CARACTER = 6;
 constexpr int CONSOLA_COLUMNAS = 78;
 constexpr int CONSOLA_FILAS = 38;
-constexpr uint32_t CONSOLA_INTERVALO_CARACTER_MS = 5;
+constexpr uint32_t CONSOLA_INTERVALO_CARACTER_MS = 12;
 constexpr uint32_t CONSOLA_PAUSA_LINEA_MS = 20;
 constexpr uint32_t CONSOLA_PAUSA_FINAL_MS = 800;
+
+struct FechaHora {
+  uint16_t anio;
+  uint8_t mes;
+  uint8_t dia;
+  uint8_t hora;
+  uint8_t minuto;
+  uint8_t segundo;
+};
+
+struct ConfiguracionPerfil {
+  uint16_t anioNacimiento;
+  uint8_t mesNacimiento;
+  uint8_t diaNacimiento;
+  uint8_t bateriaPorcentaje;
+};
+
+// Valores de prueba. Mas adelante esta estructura se cargara y guardara en
+// microSD cuando se confirme su pinout y se implemente la pantalla SETTINGS.
+constexpr ConfiguracionPerfil PERFIL_PRUEBA = {1991, 1, 7, 87};
+constexpr FechaHora FECHA_HORA_PRUEBA = {2026, 10, 26, 12, 0, 0};
+constexpr uint32_t FOOTER_INTERVALO_ACTUALIZACION_MS = 1000;
 
 SPIClass pantallaSPI(HSPI);
 #if PIPBOY_TOUCH_HABILITADO
@@ -117,15 +156,31 @@ uint8_t caracterTextoArranque = 0;
 uint32_t siguienteCaracterConsola = 0;
 uint32_t ultimoFrameIconoTerminal = 0;
 uint8_t faseIconoTerminal = 0;
+uint32_t inicioRelojPruebaMs = 0;
+uint32_t ultimaActualizacionFooterMs = 0;
+bool footerInicializado = false;
+FechaHora fechaFooterDibujada = {0, 0, 0, 0, 0, 0};
+uint16_t edadFooterDibujada = 0;
+uint8_t progresoFooterDibujado = 0;
+uint8_t bateriaFooterDibujada = 0;
+#if PIPBOY_BOTON_BOOT_HABILITADO
+bool lecturaBotonBootAnterior = false;
+bool botonBootEstable = false;
+uint32_t ultimoCambioBotonBootMs = 0;
+uint32_t inicioPulsacionBootMs = 0;
+#endif
 
 const char *const TEXTO_ARRANQUE[] = {
   "LOADER V1.1",
+  "",
   "EXEC VERSION 41.10",
   "64k RAM SYSTEM",
   "38911 BYTES FREE",
+  "",
   "NO WILDTAPE FOUND",
   "LOAD ROM(1): DEUTRIX 303",
-  "* 1 0 0x00000A 0x0000000000000000 start memory discovery",
+  "",
+  "1 0 0x00000A 0x0000000000000000 start memory discovery",
   "1 0 0x000014 0x0000000000000000 CPU0 starting cell relocation0",
   "1 0 0x000009 0x0000000000000000 CPU0 launch EFI0 0x000004",
   "1 0 0x000009 0x0000000000E003D CPU0 starting EFI0 0x000004",
@@ -669,14 +724,227 @@ void dibujarPestanas() {
   }
 }
 
+bool esAnioBisiesto(uint16_t anio) {
+  return (anio % 4 == 0 && anio % 100 != 0) || anio % 400 == 0;
+}
+
+uint8_t diasDelMes(uint16_t anio, uint8_t mes) {
+  static const uint8_t DIAS_POR_MES[] = {31, 28, 31, 30, 31, 30,
+                                          31, 31, 30, 31, 30, 31};
+  if (mes == 2 && esAnioBisiesto(anio)) return 29;
+  return DIAS_POR_MES[mes - 1];
+}
+
+void avanzarDia(FechaHora &fecha) {
+  fecha.dia++;
+  if (fecha.dia <= diasDelMes(fecha.anio, fecha.mes)) return;
+
+  fecha.dia = 1;
+  fecha.mes++;
+  if (fecha.mes <= 12) return;
+
+  fecha.mes = 1;
+  fecha.anio++;
+}
+
+int32_t diasDesdeEpoch(const FechaHora &fecha) {
+  const uint32_t aniosCompletos = fecha.anio - 1;
+  int32_t dias = 365L * aniosCompletos + aniosCompletos / 4 -
+                 aniosCompletos / 100 + aniosCompletos / 400;
+  for (uint8_t mes = 1; mes < fecha.mes; mes++) {
+    dias += diasDelMes(fecha.anio, mes);
+  }
+  return dias + fecha.dia - 1;
+}
+
+FechaHora obtenerFechaHoraPrueba() {
+  FechaHora fecha = FECHA_HORA_PRUEBA;
+  uint32_t segundos = (millis() - inicioRelojPruebaMs) / 1000;
+  segundos += fecha.hora * 3600UL + fecha.minuto * 60UL + fecha.segundo;
+
+  while (segundos >= 86400UL) {
+    segundos -= 86400UL;
+    avanzarDia(fecha);
+  }
+
+  fecha.hora = segundos / 3600UL;
+  segundos %= 3600UL;
+  fecha.minuto = segundos / 60UL;
+  fecha.segundo = segundos % 60UL;
+  return fecha;
+}
+
+uint16_t calcularEdad(const FechaHora &fecha) {
+  if (fecha.anio < PERFIL_PRUEBA.anioNacimiento) return 0;
+
+  uint16_t edad = fecha.anio - PERFIL_PRUEBA.anioNacimiento;
+  const bool aunNoCumple = fecha.mes < PERFIL_PRUEBA.mesNacimiento ||
+                           (fecha.mes == PERFIL_PRUEBA.mesNacimiento &&
+                            fecha.dia < PERFIL_PRUEBA.diaNacimiento);
+  return aunNoCumple && edad > 0 ? edad - 1 : edad;
+}
+
+uint8_t calcularProgresoNivel(const FechaHora &fecha) {
+  const bool yaCumplio = fecha.mes > PERFIL_PRUEBA.mesNacimiento ||
+                         (fecha.mes == PERFIL_PRUEBA.mesNacimiento &&
+                          fecha.dia >= PERFIL_PRUEBA.diaNacimiento);
+  const uint16_t anioUltimoCumple = fecha.anio - (yaCumplio ? 0 : 1);
+  FechaHora inicio = {anioUltimoCumple, PERFIL_PRUEBA.mesNacimiento,
+                      PERFIL_PRUEBA.diaNacimiento, 0, 0, 0};
+  avanzarDia(inicio);  // El progreso comienza el dia posterior al cumpleanos.
+  const FechaHora siguienteCumple = {
+      static_cast<uint16_t>(anioUltimoCumple + 1),
+      PERFIL_PRUEBA.mesNacimiento, PERFIL_PRUEBA.diaNacimiento, 0, 0, 0};
+
+  const int32_t total = diasDesdeEpoch(siguienteCumple) - diasDesdeEpoch(inicio);
+  const int32_t transcurridos = diasDesdeEpoch(fecha) - diasDesdeEpoch(inicio);
+  if (transcurridos <= 0) return 0;
+  if (transcurridos >= total) return 100;
+  return static_cast<uint8_t>((transcurridos * 100L) / total);
+}
+
+void escribirTextoFooter(const char *texto, int16_t x, int16_t y) {
+  pantalla.setFont(NULL);
+  pantalla.setTextSize(1);
+  pantalla.setTextColor(VERDE_PIPBOY, FONDO_SECCION_FOOTER);
+  pantalla.setCursor(x, y);
+  pantalla.print(texto);
+}
+
+void dibujarIconoBateria(int16_t x, int16_t y, uint8_t porcentaje) {
+  const uint8_t porcentajeLimitado = porcentaje > 100 ? 100 : porcentaje;
+  constexpr int ANCHO = 42;
+  constexpr int ALTO = 8;
+  pantalla.drawRect(x, y, ANCHO, ALTO, VERDE_PIPBOY);
+  pantalla.fillRect(x + ANCHO, y + 2, 3, 4, VERDE_PIPBOY);
+  pantalla.fillRect(x + 2, y + 2, ((ANCHO - 4) * porcentajeLimitado) / 100,
+                    ALTO - 4, VERDE_PIPBOY);
+}
+
+void dibujarEstructuraFooter() {
+  // Tres secciones: fecha/hora | nivel | bateria. Esta estructura solo se
+  // pinta al abrir la pantalla; asi el refresco de datos no causa parpadeo.
+  pantalla.fillRect(0, FOOTER_Y, 106, FOOTER_ALTO, FONDO_SECCION_FOOTER);
+  pantalla.fillRect(106, FOOTER_Y, 3, FOOTER_ALTO, ST77XX_BLACK);
+  pantalla.fillRect(109, FOOTER_Y, 103, FOOTER_ALTO,
+                    FONDO_SECCION_FOOTER);
+  pantalla.fillRect(212, FOOTER_Y, 3, FOOTER_ALTO, ST77XX_BLACK);
+  pantalla.fillRect(215, FOOTER_Y, 105, FOOTER_ALTO,
+                    FONDO_SECCION_FOOTER);
+}
+
+void dibujarFechaFooter(const FechaHora &fecha) {
+  char fechaTexto[11];
+  snprintf(fechaTexto, sizeof(fechaTexto), "%04u-%02u-%02u",
+           static_cast<unsigned int>(fecha.anio),
+           static_cast<unsigned int>(fecha.mes),
+           static_cast<unsigned int>(fecha.dia));
+  escribirTextoFooter(fechaTexto, 5, FOOTER_CONTENIDO_Y);
+}
+
+void dibujarHoraFooter(const FechaHora &fecha) {
+  char horaTexto[6];
+  snprintf(horaTexto, sizeof(horaTexto), "%02u:%02u",
+           static_cast<unsigned int>(fecha.hora),
+           static_cast<unsigned int>(fecha.minuto));
+  escribirTextoFooter(horaTexto, 69, FOOTER_CONTENIDO_Y);
+}
+
+void dibujarNivelFooter(uint16_t edad, uint8_t progresoNivel) {
+  char nivelTexto[14];
+  snprintf(nivelTexto, sizeof(nivelTexto), "LVL %u",
+           static_cast<unsigned int>(edad));
+
+  pantalla.fillRect(112, FOOTER_Y, 93, FOOTER_ALTO,
+                    FONDO_SECCION_FOOTER);
+  escribirTextoFooter(nivelTexto, 114, FOOTER_CONTENIDO_Y);
+  pantalla.drawRect(153, FOOTER_CONTENIDO_Y, 52, FOOTER_CONTENIDO_ALTO,
+                    VERDE_ATENUADO);
+  pantalla.fillRect(155, FOOTER_CONTENIDO_Y + 2,
+                    (48 * progresoNivel) / 100, 4, VERDE_PIPBOY);
+}
+
+void dibujarBateriaFooter(uint8_t porcentaje) {
+  char bateriaTexto[5];
+  snprintf(bateriaTexto, sizeof(bateriaTexto), "%u%%",
+           static_cast<unsigned int>(porcentaje));
+
+  // La bateria se redibuja solo si cambia su lectura.
+  pantalla.fillRect(230, FOOTER_Y, 74, FOOTER_ALTO,
+                    FONDO_SECCION_FOOTER);
+  escribirTextoFooter(bateriaTexto, 233, FOOTER_CONTENIDO_Y);
+  dibujarIconoBateria(257, FOOTER_CONTENIDO_Y, porcentaje);
+}
+
+void guardarEstadoFooter(const FechaHora &fecha, uint16_t edad,
+                         uint8_t progresoNivel, uint8_t bateria) {
+  fechaFooterDibujada = fecha;
+  edadFooterDibujada = edad;
+  progresoFooterDibujado = progresoNivel;
+  bateriaFooterDibujada = bateria;
+}
+
 void dibujarBarraInferior() {
-  pantalla.fillRect(0, 216, 320, 24, ST77XX_BLACK);
-  pantalla.drawFastHLine(0, 216, 320, GRIS);
-  pantalla.setTextColor(VERDE_PIPBOY);
-  escribirTextoPipBoy("WIFI", 8, 232, TamanoTextoPipBoy::Normal);
-  escribirTextoPipBoy("26 C", 85, 232, TamanoTextoPipBoy::Normal);
-  escribirTextoPipBoy("12:34", 150, 232, TamanoTextoPipBoy::Normal);
-  escribirTextoPipBoy("BAT 87%", 245, 232, TamanoTextoPipBoy::Normal);
+  const FechaHora fecha = obtenerFechaHoraPrueba();
+  const uint16_t edad = calcularEdad(fecha);
+  const uint8_t progresoNivel = calcularProgresoNivel(fecha);
+  const uint8_t bateria = PERFIL_PRUEBA.bateriaPorcentaje;
+
+  dibujarEstructuraFooter();
+  dibujarFechaFooter(fecha);
+  dibujarHoraFooter(fecha);
+  dibujarNivelFooter(edad, progresoNivel);
+  dibujarBateriaFooter(bateria);
+  seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);
+  guardarEstadoFooter(fecha, edad, progresoNivel, bateria);
+  footerInicializado = true;
+  ultimaActualizacionFooterMs = millis();
+}
+
+void actualizarBarraInferior() {
+  const uint32_t ahora = millis();
+  if (ahora - ultimaActualizacionFooterMs < FOOTER_INTERVALO_ACTUALIZACION_MS) {
+    return;
+  }
+  ultimaActualizacionFooterMs = ahora;
+  if (!footerInicializado) {
+    dibujarBarraInferior();
+    return;
+  }
+
+  const FechaHora fecha = obtenerFechaHoraPrueba();
+  const uint16_t edad = calcularEdad(fecha);
+  const uint8_t progresoNivel = calcularProgresoNivel(fecha);
+  const uint8_t bateria = PERFIL_PRUEBA.bateriaPorcentaje;
+  bool huboCambios = false;
+
+  if (fecha.anio != fechaFooterDibujada.anio ||
+      fecha.mes != fechaFooterDibujada.mes ||
+      fecha.dia != fechaFooterDibujada.dia) {
+    dibujarFechaFooter(fecha);
+    huboCambios = true;
+  }
+
+  if (fecha.hora != fechaFooterDibujada.hora ||
+      fecha.minuto != fechaFooterDibujada.minuto) {
+    dibujarHoraFooter(fecha);
+    huboCambios = true;
+  }
+
+  if (edad != edadFooterDibujada || progresoNivel != progresoFooterDibujado) {
+    dibujarNivelFooter(edad, progresoNivel);
+    huboCambios = true;
+  }
+
+  if (bateria != bateriaFooterDibujada) {
+    dibujarBateriaFooter(bateria);
+    huboCambios = true;
+  }
+
+  if (!huboCambios) return;
+
+  guardarEstadoFooter(fecha, edad, progresoNivel, bateria);
+  seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);
 }
 
 void dibujarBarraVital(const char *etiqueta, int x, int porcentaje) {
@@ -750,6 +1018,35 @@ void seleccionarPestanaAnterior() {
   seleccionarPestana((pestanaActual + 4) % 5);
 }
 
+#if PIPBOY_BOTON_BOOT_HABILITADO
+void revisarBotonBoot() {
+  const uint32_t ahora = millis();
+  const bool pulsado = digitalRead(BOTON_BOOT_GPIO) == LOW;
+
+  if (pulsado != lecturaBotonBootAnterior) {
+    lecturaBotonBootAnterior = pulsado;
+    ultimoCambioBotonBootMs = ahora;
+  }
+
+  if (ahora - ultimoCambioBotonBootMs < BOTON_BOOT_REBOTE_MS ||
+      pulsado == botonBootEstable) {
+    return;
+  }
+
+  botonBootEstable = pulsado;
+  if (pulsado) {
+    inicioPulsacionBootMs = ahora;
+    return;
+  }
+
+  if (ahora - inicioPulsacionBootMs >= BOTON_BOOT_PULSACION_LARGA_MS) {
+    seleccionarPestanaAnterior();
+  } else {
+    seleccionarPestanaSiguiente();
+  }
+}
+#endif
+
 #if PIPBOY_TOUCH_HABILITADO
 void revisarTouch() {
   if (!touch.touched()) {
@@ -783,8 +1080,16 @@ void revisarTouch() {
 
 void setup() {
   Serial.begin(115200);
+  inicioRelojPruebaMs = millis();
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
+
+#if PIPBOY_BOTON_BOOT_HABILITADO
+  pinMode(BOTON_BOOT_GPIO, INPUT_PULLUP);
+  const bool botonBootPulsado = digitalRead(BOTON_BOOT_GPIO) == LOW;
+  lecturaBotonBootAnterior = botonBootPulsado;
+  botonBootEstable = botonBootPulsado;
+#endif
 
   pantallaSPI.begin(TFT_SCLK, TFT_MISO, TFT_MOSI, TFT_CS);
   pantalla.init(240, 320);
@@ -811,6 +1116,10 @@ void loop() {
 #if PIPBOY_TOUCH_HABILITADO
   revisarTouch();
 #endif
+#if PIPBOY_BOTON_BOOT_HABILITADO
+  revisarBotonBoot();
+#endif
   actualizarAnimacionStat();
   actualizarIconoTerminal();
+  actualizarBarraInferior();
 }

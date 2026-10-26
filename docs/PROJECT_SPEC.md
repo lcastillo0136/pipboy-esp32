@@ -13,7 +13,8 @@ Cinco secciones permanentes: STAT, INV, DATA, MAP y RADIO.
 La pantalla táctil será la navegación principal durante el prototipo. Más adelante se añadirá encoder y botones físicos.
 
 ### Estado inferior permanente
-Mostrar Wi-Fi, temperatura, reloj y batería.
+Mostrar fecha, reloj, batería y nivel. El nivel representa la edad y el avance
+desde el día posterior al cumpleaños hasta el próximo cumpleaños.
 
 ### Filosofía de implementación
 Cada pantalla debe ser independiente. No recrear toda la UI en cada frame. Usar eventos de LVGL. Evitar animaciones pesadas.

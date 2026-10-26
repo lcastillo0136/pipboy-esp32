@@ -35,6 +35,16 @@ STAT | INV | DATA | MAP | RADIO
 ### STAT
 Estado general, batería, Wi-Fi, hora, temperatura/sensores y barras HP/AP.
 
+### Footer de prueba
+El pie de STAT muestra fecha, hora, un icono de batería con carga y `LEVEL`.
+El nivel representa la edad y su barra avanza desde el día posterior al
+cumpleaños hasta el siguiente cumpleaños. Para las pruebas actuales se usa el
+perfil de nacimiento 1991-01-07, fecha inicial 2026-10-26 y batería al 87 %.
+La hora avanza desde el arranque; todavía no es una fuente de hora real.
+
+En una fase posterior, la configuración de perfil y reloj se guardará en la
+microSD, después de confirmar su pinout, y la fecha/hora vendrá de RTC o NTP.
+
 ### INV
 Inventario/listas personales almacenadas localmente.
 
@@ -74,13 +84,13 @@ Control multimedia: play/pause, anterior/siguiente, volumen y control remoto por
 - Inicializar touch
 - Interfaz base 320x240
 - Navegación STAT / INV / DATA / MAP / RADIO
-- Barra inferior con Wi-Fi, hora y batería simulada
+- Footer con fecha, hora, batería simulada y nivel calculado
 
 ### v0.2
 - Lectura real de batería
 - Wi-Fi
 - Hora por NTP
-- Persistencia de configuración
+- Persistencia de perfil, fecha y hora en microSD
 
 ### v0.3
 - Home Assistant
