@@ -3,6 +3,7 @@
 #include <Adafruit_ST7789.h>
 #include <AnimatedGIF.h>
 #include <PNGdec.h>
+#include <SPIFFS.h>
 #include "PipboyMapClient.h"
 
 // 0: navegacion exclusiva por controles externos (valor predeterminado).
@@ -226,6 +227,7 @@ AnimatedGIF reproductorGif;
 PipboyMapClient clienteMapa;
 PNG decodificadorMapaPng;
 uint16_t lineaMapaPng[PipboyMapClient::ANCHO_MAPA];
+File archivoMapaPng;
 
 const char *pestanas[] = {"STAT", "INV", "DATA", "MAP", "RADIO"};
 int pestanaActual = 0;
@@ -1223,16 +1225,56 @@ int dibujarLineaPngMapa(PNGDRAW *linea) {
   return 1;
 }
 
-bool dibujarPngMapa(const uint8_t *imagen, size_t bytesImagen) {
-  if (imagen == nullptr || bytesImagen == 0 ||
-      bytesImagen > PipboyMapClient::MAX_PNG_BYTES) {
+void *abrirArchivoMapaPng(const char *nombre, int32_t *bytes) {
+  (void)nombre;
+  const char *ruta = clienteMapa.rutaMapaPng();
+  if (ruta == nullptr) {
+    return nullptr;
+  }
+  if (archivoMapaPng) {
+    archivoMapaPng.close();
+  }
+  archivoMapaPng = SPIFFS.open(ruta, FILE_READ);
+  if (!archivoMapaPng) {
+    return nullptr;
+  }
+  *bytes = static_cast<int32_t>(archivoMapaPng.size());
+  return &archivoMapaPng;
+}
+
+void cerrarArchivoMapaPng(void *archivo) {
+  (void)archivo;
+  if (archivoMapaPng) {
+    archivoMapaPng.close();
+  }
+}
+
+int32_t leerArchivoMapaPng(PNGFILE *archivo, uint8_t *destino,
+                           int32_t bytes) {
+  (void)archivo;
+  if (!archivoMapaPng || bytes <= 0) {
+    return 0;
+  }
+  return static_cast<int32_t>(archivoMapaPng.read(destino, bytes));
+}
+
+int32_t posicionarArchivoMapaPng(PNGFILE *archivo, int32_t posicion) {
+  (void)archivo;
+  return archivoMapaPng && posicion >= 0 && archivoMapaPng.seek(posicion)
+             ? 1
+             : 0;
+}
+
+bool dibujarPngMapa() {
+  if (clienteMapa.rutaMapaPng() == nullptr) {
     return false;
   }
 
-  const int apertura = decodificadorMapaPng.openRAM(
-      const_cast<uint8_t *>(imagen), static_cast<int>(bytesImagen),
-      dibujarLineaPngMapa);
+  const int apertura = decodificadorMapaPng.open(
+      clienteMapa.rutaMapaPng(), abrirArchivoMapaPng, cerrarArchivoMapaPng,
+      leerArchivoMapaPng, posicionarArchivoMapaPng, dibujarLineaPngMapa);
   if (apertura != PNG_SUCCESS) {
+    decodificadorMapaPng.close();
     return false;
   }
 
@@ -1456,9 +1498,7 @@ void dibujarPanelInformacionMapa() {
 void dibujarBitmapMapa() {
   pantalla.fillRect(MAPA_X, MAPA_Y, MAPA_ANCHO_DIBUJADO,
                     MAPA_ALTO_DIBUJADO, ST77XX_BLACK);
-  const uint8_t *imagen = clienteMapa.imagenPng();
-  if (imagen != nullptr &&
-      dibujarPngMapa(imagen, clienteMapa.bytesImagenPng())) {
+  if (dibujarPngMapa()) {
     // El PNG original ocupa todo el mapa y se preserva sin reticula ni
     // bloques artificiales superpuestos.
   } else {

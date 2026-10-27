@@ -51,6 +51,9 @@ umbral, conversión monocroma, recoloración ni escalado. La descarga se ejecuta
 en una tarea de FreeRTOS del núcleo 0; el `loop()` conserva el touch, la
 navegación y las animaciones sin bloquearse. PNGdec lo decodifica por líneas
 al formato RGB565 que necesita el ST7789, sin framebuffer completo ni filtros.
+El archivo crudo se conserva temporalmente en SPIFFS (máximo 64 KB) y se
+descarga en bloques de 512 bytes, por lo que no ocupa un buffer grande de DRAM.
+Por ello sigue siendo obligatorio usar `Huge APP (3MB No OTA/1MB SPIFFS)`.
 
 La conexión valida TLS contra `ISRG Root X1` (Let's Encrypt). No usa
 `setInsecure()` ni requiere bibliotecas externas.
