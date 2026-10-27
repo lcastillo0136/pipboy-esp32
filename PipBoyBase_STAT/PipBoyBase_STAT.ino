@@ -154,22 +154,45 @@ struct ConfiguracionPerfil {
   uint8_t bateriaPorcentaje;
 };
 
+// La vista WORLD queda preparada sin alterar el sistema de navegacion actual.
+// LOCAL es la unica fuente implementada mientras el endpoint entrega mapas
+// por coordenadas.
+enum class VistaMapa : uint8_t { Local, World };
+
 // Valores de prueba. Mas adelante esta estructura se cargara y guardara en
 // microSD cuando se confirme su pinout y se implemente la pantalla SETTINGS.
 constexpr ConfiguracionPerfil PERFIL_PRUEBA = {1991, 1, 7, 87};
 constexpr FechaHora FECHA_HORA_PRUEBA = {2026, 10, 26, 12, 0, 0};
 constexpr uint32_t FOOTER_INTERVALO_ACTUALIZACION_MS = 1000;
 
-// El mapa ocupa 2.4 KB a 1 bit. Se descarga en segundo plano y se dibuja en
-// verde desde este buffer, sin decodificadores PNG/JPEG ni framebuffer.
-constexpr int MAPA_X = (320 - PipboyMapClient::ANCHO_MAPA) / 2;
-constexpr int MAPA_Y = 56;
+// Area exclusiva de MAP: se conserva intacta la cabecera (0..27) y el footer
+// global (228..239). El bitmap remoto sigue siendo de 160 x 120, pero se
+// escala a 192 x 144 al dibujarse para dar prioridad visual al mapa.
+constexpr int MAPA_CONTENIDO_Y = HEADER_ALTO;
+constexpr int MAPA_CONTENIDO_ALTO = FOOTER_Y - HEADER_ALTO;
+constexpr int MAPA_SELECTOR_Y = 31;
+constexpr int MAPA_SELECTOR_ALTO = 18;
+constexpr int MAPA_SELECTOR_LOCAL_X = 99;
+constexpr int MAPA_SELECTOR_WORLD_X = 164;
+constexpr int MAPA_SELECTOR_ANCHO = 57;
+constexpr int MAPA_SELECTOR_TEXTO_Y = 45;
+constexpr int MAPA_X = 6;
+constexpr int MAPA_Y = 53;
+constexpr int MAPA_ANCHO_DIBUJADO = 192;
+constexpr int MAPA_ALTO_DIBUJADO = 144;
 constexpr int MAPA_MARCO_X = MAPA_X - 2;
 constexpr int MAPA_MARCO_Y = MAPA_Y - 2;
-constexpr int MAPA_MARCO_ANCHO = PipboyMapClient::ANCHO_MAPA + 4;
-constexpr int MAPA_MARCO_ALTO = PipboyMapClient::ALTO_MAPA + 4;
-constexpr int MAPA_CENTRO_X = MAPA_X + (PipboyMapClient::ANCHO_MAPA / 2);
-constexpr int MAPA_CENTRO_Y = MAPA_Y + (PipboyMapClient::ALTO_MAPA / 2);
+constexpr int MAPA_MARCO_ANCHO = MAPA_ANCHO_DIBUJADO + 4;
+constexpr int MAPA_MARCO_ALTO = MAPA_ALTO_DIBUJADO + 4;
+constexpr int MAPA_CENTRO_X = MAPA_X + (MAPA_ANCHO_DIBUJADO / 2);
+constexpr int MAPA_CENTRO_Y = MAPA_Y + (MAPA_ALTO_DIBUJADO / 2);
+constexpr int MAPA_INFO_X = 205;
+constexpr int MAPA_INFO_Y = 51;
+constexpr int MAPA_INFO_ANCHO = 111;
+constexpr int MAPA_INFO_ALTO = 148;
+constexpr int MAPA_ESTADO_Y = 203;
+constexpr int MAPA_ESTADO_ALTO = 23;
+constexpr int MAPA_ESTADO_TEXTO_Y = 220;
 constexpr uint32_t MAPA_INTERVALO_ACTUALIZACION_MS = 10UL * 60UL * 1000UL;
 constexpr uint32_t MAPA_TIMEOUT_WIFI_MS = 15000;
 constexpr uint32_t MAPA_TIMEOUT_HTTP_MS = 10000;
@@ -234,6 +257,7 @@ uint8_t minutoDataDibujado = 255;
 bool dosPuntosDataVisibles = true;
 uint32_t ultimoParpadeoDataMs = 0;
 uint8_t estadoMapaDibujado = 255;
+VistaMapa vistaMapaActual = VistaMapa::Local;
 #if PIPBOY_BOTON_BOOT_HABILITADO
 bool lecturaBotonBootAnterior = false;
 bool botonBootEstable = false;
@@ -1123,6 +1147,32 @@ void dibujarMarcoMapa() {
                     VERDE_OSCURO);
 }
 
+void dibujarSelectorMapa() {
+  const bool localSeleccionado = vistaMapaActual == VistaMapa::Local;
+
+  pantalla.drawRect(MAPA_SELECTOR_LOCAL_X, MAPA_SELECTOR_Y,
+                    MAPA_SELECTOR_ANCHO, MAPA_SELECTOR_ALTO,
+                    localSeleccionado ? VERDE_PIPBOY : VERDE_OSCURO);
+  pantalla.drawRect(MAPA_SELECTOR_WORLD_X, MAPA_SELECTOR_Y,
+                    MAPA_SELECTOR_ANCHO, MAPA_SELECTOR_ALTO,
+                    localSeleccionado ? VERDE_OSCURO : VERDE_PIPBOY);
+
+  const int seleccionadoX = localSeleccionado ? MAPA_SELECTOR_LOCAL_X
+                                                : MAPA_SELECTOR_WORLD_X;
+  pantalla.fillRect(seleccionadoX + 2, MAPA_SELECTOR_Y + 2,
+                    MAPA_SELECTOR_ANCHO - 4, MAPA_SELECTOR_ALTO - 4,
+                    VERDE_OSCURO);
+
+  pantalla.setTextColor(localSeleccionado ? VERDE_PIPBOY : VERDE_ATENUADO);
+  escribirTextoPipBoyCentrado(
+      "LOCAL", MAPA_SELECTOR_LOCAL_X + (MAPA_SELECTOR_ANCHO / 2),
+      MAPA_SELECTOR_TEXTO_Y, TamanoTextoPipBoy::Normal);
+  pantalla.setTextColor(localSeleccionado ? VERDE_ATENUADO : VERDE_PIPBOY);
+  escribirTextoPipBoyCentrado(
+      "WORLD", MAPA_SELECTOR_WORLD_X + (MAPA_SELECTOR_ANCHO / 2),
+      MAPA_SELECTOR_TEXTO_Y, TamanoTextoPipBoy::Normal);
+}
+
 void dibujarCruzMapa() {
   pantalla.drawFastHLine(MAPA_CENTRO_X - 7, MAPA_CENTRO_Y, 15,
                          VERDE_BRILLO);
@@ -1132,40 +1182,173 @@ void dibujarCruzMapa() {
                     VERDE_PIPBOY);
 }
 
+void dibujarReticulaMapa() {
+  for (int x = MAPA_X + 12; x < MAPA_X + MAPA_ANCHO_DIBUJADO; x += 16) {
+    pantalla.drawFastVLine(x, MAPA_Y, MAPA_ALTO_DIBUJADO, VERDE_OSCURO);
+  }
+  for (int y = MAPA_Y + 12; y < MAPA_Y + MAPA_ALTO_DIBUJADO; y += 16) {
+    pantalla.drawFastHLine(MAPA_X, y, MAPA_ANCHO_DIBUJADO, VERDE_OSCURO);
+  }
+}
+
+void dibujarPlanoTecnicoMapa() {
+  // Manzanas y vialidades tenues que dan estructura al mapa durante la carga
+  // y complementan las calles recibidas del endpoint sin usar memoria extra.
+  pantalla.drawRect(MAPA_X + 12, MAPA_Y + 16, 34, 22, VERDE_OSCURO);
+  pantalla.drawRect(MAPA_X + 57, MAPA_Y + 11, 28, 31, VERDE_OSCURO);
+  pantalla.drawRect(MAPA_X + 116, MAPA_Y + 18, 42, 20, VERDE_OSCURO);
+  pantalla.drawRect(MAPA_X + 24, MAPA_Y + 77, 38, 32, VERDE_OSCURO);
+  pantalla.drawRect(MAPA_X + 81, MAPA_Y + 89, 31, 25, VERDE_OSCURO);
+  pantalla.drawRect(MAPA_X + 137, MAPA_Y + 74, 34, 37, VERDE_OSCURO);
+
+  pantalla.drawLine(MAPA_X, MAPA_Y + 39, MAPA_X + MAPA_ANCHO_DIBUJADO - 1,
+                    MAPA_Y + 62, VERDE_OSCURO);
+  pantalla.drawLine(MAPA_X, MAPA_Y + 41, MAPA_X + MAPA_ANCHO_DIBUJADO - 1,
+                    MAPA_Y + 64, VERDE_OSCURO);
+  pantalla.drawLine(MAPA_X + 33, MAPA_Y, MAPA_X + 60,
+                    MAPA_Y + MAPA_ALTO_DIBUJADO - 1, VERDE_OSCURO);
+  pantalla.drawLine(MAPA_X + 35, MAPA_Y, MAPA_X + 62,
+                    MAPA_Y + MAPA_ALTO_DIBUJADO - 1, VERDE_OSCURO);
+}
+
+bool pixelMapaActivo(const uint8_t *bitmap, uint16_t x, uint16_t y) {
+  const size_t indice =
+      (static_cast<size_t>(y) * PipboyMapClient::BYTES_POR_FILA) + (x / 8);
+  return (bitmap[indice] & (0x80 >> (x % 8))) != 0;
+}
+
+void dibujarBitmapMapaEscalado(const uint8_t *bitmap) {
+  // Se agrupan los pixeles activos por fila para escalar el bitmap 160 x 120
+  // sin framebuffer ni asignaciones dinamicas. Las lineas se envian como
+  // tramos horizontales para evitar el costo de un drawPixel por bit.
+  pantalla.startWrite();
+  for (uint16_t y = 0; y < MAPA_ALTO_DIBUJADO; y++) {
+    const uint16_t origenY =
+        (static_cast<uint32_t>(y) * PipboyMapClient::ALTO_MAPA) /
+        MAPA_ALTO_DIBUJADO;
+    int inicioTrazo = -1;
+
+    for (uint16_t x = 0; x <= MAPA_ANCHO_DIBUJADO; x++) {
+      const bool activo =
+          x < MAPA_ANCHO_DIBUJADO &&
+          pixelMapaActivo(
+              bitmap,
+              (static_cast<uint32_t>(x) * PipboyMapClient::ANCHO_MAPA) /
+                  MAPA_ANCHO_DIBUJADO,
+              origenY);
+
+      if (activo && inicioTrazo < 0) {
+        inicioTrazo = x;
+      } else if (!activo && inicioTrazo >= 0) {
+        pantalla.writeFastHLine(MAPA_X + inicioTrazo, MAPA_Y + y,
+                                x - inicioTrazo, VERDE_PIPBOY);
+        inicioTrazo = -1;
+      }
+    }
+  }
+  pantalla.endWrite();
+}
+
+void dibujarIconoJugadorMapa(int x, int y, uint16_t color) {
+  pantalla.drawCircle(x, y, 4, color);
+  pantalla.drawFastHLine(x - 6, y, 13, color);
+  pantalla.drawFastVLine(x, y - 6, 13, color);
+}
+
+void dibujarIconoCasaMapa(int x, int y, uint16_t color) {
+  pantalla.drawRect(x - 4, y - 1, 9, 7, color);
+  pantalla.drawLine(x - 5, y - 1, x, y - 6, color);
+  pantalla.drawLine(x, y - 6, x + 5, y - 1, color);
+  pantalla.drawFastVLine(x + 1, y + 2, 3, color);
+}
+
+void dibujarIconoTallerMapa(int x, int y, uint16_t color) {
+  pantalla.drawCircle(x - 3, y - 3, 3, color);
+  pantalla.drawFastHLine(x - 6, y - 3, 3, ST77XX_BLACK);
+  pantalla.drawLine(x - 1, y - 1, x + 5, y + 5, color);
+  pantalla.drawLine(x + 5, y - 1, x - 1, y + 5, color);
+}
+
+void dibujarIconoClinicaMapa(int x, int y, uint16_t color) {
+  pantalla.drawRect(x - 5, y - 5, 11, 11, color);
+  pantalla.drawFastHLine(x - 3, y, 7, color);
+  pantalla.drawFastVLine(x, y - 3, 7, color);
+}
+
+void dibujarIconoRadioMapa(int x, int y, uint16_t color) {
+  pantalla.drawFastVLine(x, y - 5, 9, color);
+  pantalla.drawLine(x, y - 5, x - 3, y - 1, color);
+  pantalla.drawLine(x, y - 5, x + 3, y - 1, color);
+  pantalla.drawFastHLine(x - 5, y + 5, 11, color);
+  pantalla.drawLine(x - 6, y - 4, x - 8, y, color);
+  pantalla.drawLine(x + 6, y - 4, x + 8, y, color);
+}
+
+void dibujarPanelInformacionMapa() {
+  pantalla.fillRect(MAPA_INFO_X, MAPA_INFO_Y, MAPA_INFO_ANCHO,
+                    MAPA_INFO_ALTO, ST77XX_BLACK);
+  pantalla.drawRect(MAPA_INFO_X, MAPA_INFO_Y, MAPA_INFO_ANCHO,
+                    MAPA_INFO_ALTO, VERDE_ATENUADO);
+  pantalla.drawFastHLine(MAPA_INFO_X + 5, MAPA_INFO_Y + 21,
+                         MAPA_INFO_ANCHO - 10, VERDE_OSCURO);
+  pantalla.drawFastHLine(MAPA_INFO_X + 5, MAPA_INFO_Y + 85,
+                         MAPA_INFO_ANCHO - 10, VERDE_OSCURO);
+
+  pantalla.setTextColor(VERDE_PIPBOY);
+  escribirTextoPipBoyCentrado("INFO", MAPA_INFO_X + (MAPA_INFO_ANCHO / 2),
+                              MAPA_INFO_Y + 16, TamanoTextoPipBoy::Normal);
+  pantalla.setTextColor(VERDE_ATENUADO);
+  escribirTextoPipBoy("LUGAR: Z15", MAPA_INFO_X + 5, MAPA_INFO_Y + 35,
+                      TamanoTextoPipBoy::Normal);
+  escribirTextoPipBoy("TIPO: BASE", MAPA_INFO_X + 5, MAPA_INFO_Y + 49,
+                      TamanoTextoPipBoy::Normal);
+  escribirTextoPipBoy("DIST: 120M", MAPA_INFO_X + 5, MAPA_INFO_Y + 63,
+                      TamanoTextoPipBoy::Normal);
+  escribirTextoPipBoy("ZOOM: X2", MAPA_INFO_X + 5, MAPA_INFO_Y + 77,
+                      TamanoTextoPipBoy::Normal);
+
+  pantalla.setTextColor(VERDE_PIPBOY);
+  escribirTextoPipBoy("POI", MAPA_INFO_X + 5, MAPA_INFO_Y + 100,
+                      TamanoTextoPipBoy::Normal);
+  const int iconoY = MAPA_INFO_Y + 116;
+  dibujarIconoJugadorMapa(MAPA_INFO_X + 11, iconoY, VERDE_PIPBOY);
+  dibujarIconoCasaMapa(MAPA_INFO_X + 32, iconoY, VERDE_ATENUADO);
+  dibujarIconoTallerMapa(MAPA_INFO_X + 53, iconoY, VERDE_ATENUADO);
+  dibujarIconoClinicaMapa(MAPA_INFO_X + 74, iconoY, VERDE_ATENUADO);
+  dibujarIconoRadioMapa(MAPA_INFO_X + 95, iconoY, VERDE_ATENUADO);
+}
+
 void dibujarBitmapMapa() {
-  pantalla.fillRect(MAPA_X, MAPA_Y, PipboyMapClient::ANCHO_MAPA,
-                    PipboyMapClient::ALTO_MAPA, ST77XX_BLACK);
+  pantalla.fillRect(MAPA_X, MAPA_Y, MAPA_ANCHO_DIBUJADO,
+                    MAPA_ALTO_DIBUJADO, ST77XX_BLACK);
+  dibujarReticulaMapa();
+  dibujarPlanoTecnicoMapa();
   const uint8_t *bitmap = clienteMapa.bitmap();
   if (bitmap != nullptr) {
-    pantalla.drawBitmap(MAPA_X, MAPA_Y, bitmap, PipboyMapClient::ANCHO_MAPA,
-                        PipboyMapClient::ALTO_MAPA, VERDE_PIPBOY);
-    dibujarCruzMapa();
+    dibujarBitmapMapaEscalado(bitmap);
   }
+  dibujarCruzMapa();
   dibujarMarcoMapa();
 }
 
 void dibujarEstadoMapa() {
-  pantalla.fillRect(4, 182, 312, 43, ST77XX_BLACK);
-  pantalla.setTextColor(VERDE_ATENUADO);
-  escribirTextoPipBoyCentrado("COORD. PRUEBA / Z15", 160, 198,
-                              TamanoTextoPipBoy::Normal);
-  pantalla.setTextColor(VERDE_PIPBOY);
-  escribirTextoPipBoyCentrado(clienteMapa.textoEstado(), 160, 218,
+  pantalla.fillRect(4, MAPA_ESTADO_Y, 312, MAPA_ESTADO_ALTO, ST77XX_BLACK);
+  const char *estado = clienteMapa.hayMapaDisponible()
+                          ? "COORD: Z15-04 | SENAL OK"
+                          : clienteMapa.textoEstado();
+  pantalla.setTextColor(clienteMapa.hayMapaDisponible() ? VERDE_ATENUADO
+                                                          : VERDE_PIPBOY);
+  escribirTextoPipBoyCentrado(estado, 160, MAPA_ESTADO_TEXTO_Y,
                               TamanoTextoPipBoy::Normal);
   estadoMapaDibujado = static_cast<uint8_t>(clienteMapa.estado());
 }
 
 void dibujarMapa() {
-  pantalla.setTextColor(VERDE_PIPBOY);
-  escribirTextoPipBoyCentrado("LOCAL MAP", 160, 47,
-                              TamanoTextoPipBoy::Normal);
-  if (clienteMapa.hayMapaDisponible()) {
-    dibujarBitmapMapa();
-  } else {
-    pantalla.fillRect(MAPA_X, MAPA_Y, PipboyMapClient::ANCHO_MAPA,
-                      PipboyMapClient::ALTO_MAPA, ST77XX_BLACK);
-    dibujarMarcoMapa();
-  }
+  pantalla.fillRect(0, MAPA_CONTENIDO_Y, 320, MAPA_CONTENIDO_ALTO,
+                    ST77XX_BLACK);
+  dibujarSelectorMapa();
+  dibujarPanelInformacionMapa();
+  dibujarBitmapMapa();
 
   clienteMapa.solicitarActualizacion(PIPBOY_MAP_LATITUD_PRUEBA,
                                      PIPBOY_MAP_LONGITUD_PRUEBA,
