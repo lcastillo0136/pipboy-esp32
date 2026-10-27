@@ -1169,11 +1169,13 @@ void dibujarSelectorMapa() {
       MAPA_SELECTOR_TEXTO_Y, TamanoTextoPipBoy::Normal);
 }
 
-void dibujarIconoJugadorMapa(int x, int y, uint8_t escala, uint16_t color);
-
 void dibujarCruzMapa() {
-  dibujarIconoJugadorMapa(MAPA_CENTRO_X - 12, MAPA_CENTRO_Y - 12, 1,
-                          VERDE_BRILLO);
+  pantalla.drawFastHLine(MAPA_CENTRO_X - 7, MAPA_CENTRO_Y, 15,
+                         VERDE_BRILLO);
+  pantalla.drawFastVLine(MAPA_CENTRO_X, MAPA_CENTRO_Y - 7, 15,
+                         VERDE_BRILLO);
+  pantalla.drawRect(MAPA_CENTRO_X - 2, MAPA_CENTRO_Y - 2, 5, 5,
+                    VERDE_PIPBOY);
 }
 
 void dibujarReticulaMapa() {
@@ -1393,11 +1395,15 @@ void escribirTextoMapaCompacto(const char *texto, int16_t x, int16_t y,
 
 void dibujarMarcadoresPruebaMapa() {
   // Datos decorativos de prueba, separados de la imagen real del endpoint.
-  // Se reemplazaran por marcadores descubiertos y seleccionables mas adelante.
-  dibujarIconoCasaMapa(MAPA_X + 25, MAPA_Y + 20, 1, VERDE_PIPBOY);
-  dibujarIconoClinicaMapa(MAPA_X + 143, MAPA_Y + 18, 1, VERDE_PIPBOY);
-  dibujarIconoTallerMapa(MAPA_X + 165, MAPA_Y + 94, 1, VERDE_ATENUADO);
-  dibujarIconoRadioMapa(MAPA_X + 15, MAPA_Y + 106, 1, VERDE_ATENUADO);
+  // La vista general usa la variante compacta; las funciones de 24 x 24 se
+  // conservan para un futuro mapa con zoom o detalle de ubicacion.
+  dibujarIconoCasaMapaCompacto(MAPA_X + 38, MAPA_Y + 36, VERDE_PIPBOY);
+  dibujarIconoClinicaMapaCompacto(MAPA_X + 150, MAPA_Y + 33,
+                                  VERDE_PIPBOY);
+  dibujarIconoTallerMapaCompacto(MAPA_X + 171, MAPA_Y + 107,
+                                 VERDE_ATENUADO);
+  dibujarIconoRadioMapaCompacto(MAPA_X + 29, MAPA_Y + 118,
+                                VERDE_ATENUADO);
 }
 
 void dibujarPanelInformacionMapa() {
