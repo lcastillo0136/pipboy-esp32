@@ -25,6 +25,7 @@ class PipboyMapClient {
     ErrorTls,
     ErrorHttp,
     ErrorFormato,
+    ErrorSinDetalle,
     ErrorMemoria,
   };
 
@@ -66,6 +67,7 @@ class PipboyMapClient {
   bool estaConfigurado() const;
   bool debeActualizar(uint32_t ahora) const;
   bool validarRespuesta() const;
+  bool respuestaTieneDetalle() const;
   static bool tiempoAlcanzado(uint32_t ahora, uint32_t objetivo);
 
   Configuracion _configuracion = {};

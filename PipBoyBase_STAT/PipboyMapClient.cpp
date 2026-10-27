@@ -148,6 +148,7 @@ const char *PipboyMapClient::textoEstado() const {
     case Estado::ErrorTls: return "ERROR TLS / REINTENTO";
     case Estado::ErrorHttp: return "ERROR API / REINTENTO";
     case Estado::ErrorFormato: return "MAPA INVALIDO / REINTENTO";
+    case Estado::ErrorSinDetalle: return "MAPA SIN DETALLE / REINTENTO";
     case Estado::ErrorMemoria: return "ERROR TAREA / REINTENTO";
   }
   return "ESTADO DESCONOCIDO";
@@ -239,6 +240,13 @@ void PipboyMapClient::descargarEnSegundoPlano() {
     terminarConError(Estado::ErrorFormato);
     return;
   }
+  if (!respuestaTieneDetalle()) {
+    // La cabecera puede ser válida mientras la CDN de Mapbox todavía entrega
+    // un estilo sin trazos. No se acepta como mapa listo: se reintentará con
+    // el intervalo corto configurado, sin bloquear la interfaz.
+    terminarConError(Estado::ErrorSinDetalle);
+    return;
+  }
   terminarConMapa();
 }
 
@@ -296,6 +304,16 @@ bool PipboyMapClient::validarRespuesta() const {
   return ancho == ANCHO_MAPA && alto == ALTO_MAPA &&
          bytesFila == BYTES_POR_FILA && _respuesta[10] == 1 &&
          _respuesta[11] == 0;
+}
+
+bool PipboyMapClient::respuestaTieneDetalle() const {
+  for (size_t indice = CABECERA_BYTES; indice < RESPUESTA_BYTES; indice++) {
+    if (_respuesta[indice] != 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool PipboyMapClient::tiempoAlcanzado(uint32_t ahora, uint32_t objetivo) {
