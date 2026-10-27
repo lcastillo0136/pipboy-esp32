@@ -1397,10 +1397,12 @@ void dibujarMarcadoresPruebaMapa() {
   // Datos decorativos de prueba, separados de la imagen real del endpoint.
   // Los iconos nativos de 16 x 16 preservan el detalle sin competir con las
   // calles reales recibidas del endpoint.
-  dibujarIconoCasaMapa(MAPA_X + 30, MAPA_Y + 25, 1, VERDE_PIPBOY);
-  dibujarIconoClinicaMapa(MAPA_X + 145, MAPA_Y + 22, 1, VERDE_PIPBOY);
-  dibujarIconoTallerMapa(MAPA_X + 170, MAPA_Y + 101, 1, VERDE_ATENUADO);
-  dibujarIconoRadioMapa(MAPA_X + 20, MAPA_Y + 111, 1, VERDE_ATENUADO);
+  // Los marcadores usan el verde de mayor brillo para separarse de las
+  // calles y la reticula, que se dibujan en verdes mas oscuros.
+  dibujarIconoCasaMapa(MAPA_X + 30, MAPA_Y + 25, 1, VERDE_BRILLO);
+  dibujarIconoClinicaMapa(MAPA_X + 145, MAPA_Y + 22, 1, VERDE_BRILLO);
+  dibujarIconoTallerMapa(MAPA_X + 170, MAPA_Y + 101, 1, VERDE_BRILLO);
+  dibujarIconoRadioMapa(MAPA_X + 20, MAPA_Y + 111, 1, VERDE_BRILLO);
 }
 
 void dibujarPanelInformacionMapa() {
