@@ -42,7 +42,14 @@ final class PipboyMapEndpoint
                     $request['width'],
                     $request['height']
                 );
-                self::writeCache($cacheFile, $payload);
+
+                // Los nodos CDN de Mapbox pueden servir temporalmente la
+                // versión previa de un estilo. Si esa imagen no contiene
+                // trazos, no se conserva: la siguiente consulta podrá
+                // recuperar el mapa en cuanto la propagación concluya.
+                if (self::hasForegroundPixels($payload)) {
+                    self::writeCache($cacheFile, $payload);
+                }
             }
 
             self::sendMap($payload, $config['attribution']);
@@ -223,7 +230,7 @@ final class PipboyMapEndpoint
             return null;
         }
 
-        return $payload;
+        return self::hasForegroundPixels($payload) ? $payload : null;
     }
 
     private static function fetchMapboxImage(array $config, array $request): string
@@ -366,6 +373,21 @@ final class PipboyMapEndpoint
         imagedestroy($image);
 
         return pack('a4vvvCC', 'PBM1', $width, $height, $bytesPerRow, 1, 0) . $pixels;
+    }
+
+    private static function hasForegroundPixels(string $payload): bool
+    {
+        if (strlen($payload) <= self::HEADER_LENGTH) {
+            return false;
+        }
+
+        for ($index = self::HEADER_LENGTH, $length = strlen($payload); $index < $length; $index++) {
+            if (ord($payload[$index]) !== 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function writeCache(string $cacheFile, string $payload): void
