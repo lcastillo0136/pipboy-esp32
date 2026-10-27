@@ -6,3 +6,8 @@
 # Generated static-map responses. The directory itself is kept for deployment.
 /cache/*
 !/cache/.gitkeep
+
+# Capturas PNG originales para inspección visual. Se crean por solicitud y no
+# deben subirse al repositorio.
+/public/images/*
+!/public/images/.gitkeep

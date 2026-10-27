@@ -37,6 +37,7 @@ final class PipboyMapEndpoint
 
             if ($payload === null) {
                 $image = self::fetchMapboxImage($config, $request);
+                self::saveSourceImage($image, $request);
                 $payload = self::convertToPackedBitmap(
                     $image,
                     $request['width'],
@@ -292,6 +293,41 @@ final class PipboyMapEndpoint
         if (!preg_match('/^[A-Za-z0-9_-]{1,128}$/', $value)) {
             throw new PipboyMapHttpException(500, 'server_not_configured');
         }
+    }
+
+    private static function saveSourceImage(string $image, array $request): void
+    {
+        $directory = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'images';
+        if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
+            throw new PipboyMapHttpException(500, 'image_storage_unavailable');
+        }
+
+        // El nombre se compone solo de valores numéricos ya validados. Cada
+        // ubicación conserva la última imagen PNG descargada de Mapbox.
+        $filename = sprintf(
+            'map_lat%s_lon%s_z%d_%dx%d.png',
+            self::coordinateFilename((float) $request['latitude']),
+            self::coordinateFilename((float) $request['longitude']),
+            (int) $request['zoom'],
+            (int) $request['width'],
+            (int) $request['height']
+        );
+        $imagePath = $directory . DIRECTORY_SEPARATOR . $filename;
+        $temporaryPath = $imagePath . '.' . bin2hex(random_bytes(6)) . '.tmp';
+
+        if (file_put_contents($temporaryPath, $image, LOCK_EX) === false || !rename($temporaryPath, $imagePath)) {
+            @unlink($temporaryPath);
+            throw new PipboyMapHttpException(500, 'image_storage_unavailable');
+        }
+    }
+
+    private static function coordinateFilename(float $coordinate): string
+    {
+        return str_replace(
+            array('-', '.'),
+            array('m', '_'),
+            number_format($coordinate, 6, '.', '')
+        );
     }
 
     private static function convertToPackedBitmap(string $sourceImage, int $width, int $height): string

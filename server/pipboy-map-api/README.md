@@ -20,8 +20,8 @@ ESP32 puede dibujar sin decodificar PNG o JPEG.
 2. Copia `config.example.php` como `config.php` y sustituye los valores
    `CHANGE_ME`. Ese archivo está ignorado por Git y debe permanecer fuera de
    `public/`.
-3. Conserva la carpeta `cache/` con permisos de escritura para el proceso PHP.
-   El endpoint crea los archivos de caché automáticamente.
+3. Conserva las carpetas `cache/` y `public/images/` con permisos de escritura
+   para el proceso PHP. El endpoint crea los archivos automáticamente.
 4. Sube el contenido de esta carpeta al servidor y apunta el subdominio a
    `public/`.
 
@@ -96,6 +96,12 @@ bitmap nuevo, sin reutilizar el generado por el estilo anterior.
 La conversión usa el contraste de cada imagen para conservar líneas
 antialiasadas del estilo publicado; una imagen sin contraste se mantiene negra
 en vez de llenar la pantalla de ruido.
+
+Cada imagen PNG original descargada de Mapbox se guarda antes de convertirla
+en `public/images/`. El nombre identifica la coordenada, zoom y tamaño, por
+ejemplo `map_lat19_432600_lonm99_133200_z15_160x120.png`; una nueva descarga
+para esa misma zona sustituye la captura anterior. Estos PNG son públicos bajo
+el subdominio, por lo que no contienen tokens ni datos privados.
 
 Mapbox puede conservar una versión de un estilo en la CDN de Static Images
 hasta 12 horas después de publicarlo. Si necesitas que una revisión visual
