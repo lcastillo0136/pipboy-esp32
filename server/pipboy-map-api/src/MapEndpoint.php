@@ -22,7 +22,7 @@ final class PipboyMapEndpoint
     private const MAX_UPSTREAM_BYTES = 2097152;
     // Cambiar esta version fuerza un bitmap nuevo si evoluciona el algoritmo
     // de conversión, sin reutilizar una caché de otra representación visual.
-    private const BITMAP_CONVERSION_VERSION = '2';
+    private const BITMAP_CONVERSION_VERSION = '3';
 
     public static function run(string $configPath): void
     {
@@ -338,6 +338,15 @@ final class PipboyMapEndpoint
         }
 
         if (imagesx($image) !== $width || imagesy($image) !== $height) {
+            imagedestroy($image);
+            throw new PipboyMapHttpException(502, 'invalid_map_image');
+        }
+
+        // Mapbox puede responder un PNG indexado. En GD, imagecolorat()
+        // devuelve en ese caso el índice de la paleta, no un color RGB; sin
+        // convertirlo, los caminos se interpretan como negros y desaparecen
+        // al empaquetar el bitmap de 1 bit.
+        if (!imageistruecolor($image) && !imagepalettetotruecolor($image)) {
             imagedestroy($image);
             throw new PipboyMapHttpException(502, 'invalid_map_image');
         }
