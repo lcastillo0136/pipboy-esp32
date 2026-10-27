@@ -98,10 +98,15 @@ antialiasadas del estilo publicado; una imagen sin contraste se mantiene negra
 en vez de llenar la pantalla de ruido.
 
 Cada imagen PNG original descargada de Mapbox se guarda antes de convertirla
-en `public/images/`. El nombre identifica la coordenada, zoom y tamaño, por
-ejemplo `map_lat19_432600_lonm99_133200_z15_160x120.png`; una nueva descarga
-para esa misma zona sustituye la captura anterior. Estos PNG son públicos bajo
-el subdominio, por lo que no contienen tokens ni datos privados.
+en `public/images/`. Después se crea una segunda captura del resultado PBM1,
+con fondo negro y píxeles verdes, que coincide exactamente con el mapa que
+recibe la ESP32. Por ejemplo:
+
+- Original: `map_lat19_432600_lonm99_133200_z15_160x120.png`
+- Convertida: `map_lat19_432600_lonm99_133200_z15_160x120_processed.png`
+
+Una nueva descarga para esa misma zona sustituye ambas capturas. Estos PNG son
+públicos bajo el subdominio, por lo que no contienen tokens ni datos privados.
 
 Mapbox puede conservar una versión de un estilo en la CDN de Static Images
 hasta 12 horas después de publicarlo. Si necesitas que una revisión visual
