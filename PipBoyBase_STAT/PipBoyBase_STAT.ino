@@ -172,13 +172,13 @@ constexpr int MAPA_CONTENIDO_Y = HEADER_ALTO;
 constexpr int MAPA_CONTENIDO_ALTO = FOOTER_Y - HEADER_ALTO;
 constexpr int MAPA_SELECTOR_Y = 31;
 constexpr int MAPA_SELECTOR_ALTO = 18;
-constexpr int MAPA_SELECTOR_LOCAL_X = 99;
-constexpr int MAPA_SELECTOR_WORLD_X = 164;
-constexpr int MAPA_SELECTOR_ANCHO = 57;
+constexpr int MAPA_SELECTOR_LOCAL_X = 102;
+constexpr int MAPA_SELECTOR_WORLD_X = 184;
+constexpr int MAPA_SELECTOR_ANCHO = 62;
 constexpr int MAPA_SELECTOR_TEXTO_Y = 45;
 constexpr int MAPA_X = 6;
 constexpr int MAPA_Y = 53;
-constexpr int MAPA_ANCHO_DIBUJADO = 192;
+constexpr int MAPA_ANCHO_DIBUJADO = 205;
 constexpr int MAPA_ALTO_DIBUJADO = 144;
 constexpr int MAPA_MARCO_X = MAPA_X - 2;
 constexpr int MAPA_MARCO_Y = MAPA_Y - 2;
@@ -186,9 +186,9 @@ constexpr int MAPA_MARCO_ANCHO = MAPA_ANCHO_DIBUJADO + 4;
 constexpr int MAPA_MARCO_ALTO = MAPA_ALTO_DIBUJADO + 4;
 constexpr int MAPA_CENTRO_X = MAPA_X + (MAPA_ANCHO_DIBUJADO / 2);
 constexpr int MAPA_CENTRO_Y = MAPA_Y + (MAPA_ALTO_DIBUJADO / 2);
-constexpr int MAPA_INFO_X = 205;
+constexpr int MAPA_INFO_X = 217;
 constexpr int MAPA_INFO_Y = 51;
-constexpr int MAPA_INFO_ANCHO = 111;
+constexpr int MAPA_INFO_ANCHO = 99;
 constexpr int MAPA_INFO_ALTO = 148;
 constexpr int MAPA_ESTADO_Y = 203;
 constexpr int MAPA_ESTADO_ALTO = 23;
@@ -1149,25 +1149,21 @@ void dibujarMarcoMapa() {
 
 void dibujarSelectorMapa() {
   const bool localSeleccionado = vistaMapaActual == VistaMapa::Local;
-
-  pantalla.drawRect(MAPA_SELECTOR_LOCAL_X, MAPA_SELECTOR_Y,
-                    MAPA_SELECTOR_ANCHO, MAPA_SELECTOR_ALTO,
-                    localSeleccionado ? VERDE_PIPBOY : VERDE_OSCURO);
-  pantalla.drawRect(MAPA_SELECTOR_WORLD_X, MAPA_SELECTOR_Y,
-                    MAPA_SELECTOR_ANCHO, MAPA_SELECTOR_ALTO,
-                    localSeleccionado ? VERDE_OSCURO : VERDE_PIPBOY);
-
   const int seleccionadoX = localSeleccionado ? MAPA_SELECTOR_LOCAL_X
                                                 : MAPA_SELECTOR_WORLD_X;
-  pantalla.fillRect(seleccionadoX + 2, MAPA_SELECTOR_Y + 2,
-                    MAPA_SELECTOR_ANCHO - 4, MAPA_SELECTOR_ALTO - 4,
-                    VERDE_OSCURO);
+  pantalla.fillRect(seleccionadoX, MAPA_SELECTOR_Y, MAPA_SELECTOR_ANCHO,
+                    MAPA_SELECTOR_ALTO, VERDE_PIPBOY);
+  pantalla.drawRect(seleccionadoX, MAPA_SELECTOR_Y, MAPA_SELECTOR_ANCHO,
+                    MAPA_SELECTOR_ALTO, VERDE_BRILLO);
 
-  pantalla.setTextColor(localSeleccionado ? VERDE_PIPBOY : VERDE_ATENUADO);
+  pantalla.setTextColor(localSeleccionado ? ST77XX_BLACK : VERDE_PIPBOY);
   escribirTextoPipBoyCentrado(
       "LOCAL", MAPA_SELECTOR_LOCAL_X + (MAPA_SELECTOR_ANCHO / 2),
       MAPA_SELECTOR_TEXTO_Y, TamanoTextoPipBoy::Normal);
-  pantalla.setTextColor(localSeleccionado ? VERDE_ATENUADO : VERDE_PIPBOY);
+  pantalla.setTextColor(VERDE_ATENUADO);
+  escribirTextoPipBoyCentrado("|", 173, MAPA_SELECTOR_TEXTO_Y,
+                              TamanoTextoPipBoy::Normal);
+  pantalla.setTextColor(localSeleccionado ? VERDE_PIPBOY : ST77XX_BLACK);
   escribirTextoPipBoyCentrado(
       "WORLD", MAPA_SELECTOR_WORLD_X + (MAPA_SELECTOR_ANCHO / 2),
       MAPA_SELECTOR_TEXTO_Y, TamanoTextoPipBoy::Normal);
@@ -1284,6 +1280,27 @@ void dibujarIconoRadioMapa(int x, int y, uint16_t color) {
   pantalla.drawLine(x + 6, y - 4, x + 8, y, color);
 }
 
+void escribirTextoMapaCompacto(const char *texto, int16_t x, int16_t y,
+                                uint16_t color) {
+  // Reutiliza la microtipografia ya usada por el footer para que la leyenda
+  // sea legible en el panel estrecho sin tocar la fuente global de la UI.
+  pantalla.setFont(NULL);
+  pantalla.setTextSize(1);
+  pantalla.setTextColor(color);
+  pantalla.setCursor(x, y);
+  pantalla.print(texto);
+  seleccionarFuentePipBoy(TamanoTextoPipBoy::Normal);
+}
+
+void dibujarMarcadoresPruebaMapa() {
+  // Datos decorativos de prueba, separados de la imagen real del endpoint.
+  // Se reemplazaran por marcadores descubiertos y seleccionables mas adelante.
+  dibujarIconoCasaMapa(MAPA_X + 36, MAPA_Y + 34, VERDE_PIPBOY);
+  dibujarIconoClinicaMapa(MAPA_X + 142, MAPA_Y + 31, VERDE_PIPBOY);
+  dibujarIconoTallerMapa(MAPA_X + 163, MAPA_Y + 104, VERDE_ATENUADO);
+  dibujarIconoRadioMapa(MAPA_X + 27, MAPA_Y + 112, VERDE_ATENUADO);
+}
+
 void dibujarPanelInformacionMapa() {
   pantalla.fillRect(MAPA_INFO_X, MAPA_INFO_Y, MAPA_INFO_ANCHO,
                     MAPA_INFO_ALTO, ST77XX_BLACK);
@@ -1291,31 +1308,38 @@ void dibujarPanelInformacionMapa() {
                     MAPA_INFO_ALTO, VERDE_ATENUADO);
   pantalla.drawFastHLine(MAPA_INFO_X + 5, MAPA_INFO_Y + 21,
                          MAPA_INFO_ANCHO - 10, VERDE_OSCURO);
-  pantalla.drawFastHLine(MAPA_INFO_X + 5, MAPA_INFO_Y + 85,
+  pantalla.drawFastHLine(MAPA_INFO_X + 5, MAPA_INFO_Y + 72,
                          MAPA_INFO_ANCHO - 10, VERDE_OSCURO);
 
   pantalla.setTextColor(VERDE_PIPBOY);
   escribirTextoPipBoyCentrado("INFO", MAPA_INFO_X + (MAPA_INFO_ANCHO / 2),
                               MAPA_INFO_Y + 16, TamanoTextoPipBoy::Normal);
-  pantalla.setTextColor(VERDE_ATENUADO);
-  escribirTextoPipBoy("LUGAR: Z15", MAPA_INFO_X + 5, MAPA_INFO_Y + 35,
-                      TamanoTextoPipBoy::Normal);
-  escribirTextoPipBoy("TIPO: BASE", MAPA_INFO_X + 5, MAPA_INFO_Y + 49,
-                      TamanoTextoPipBoy::Normal);
-  escribirTextoPipBoy("DIST: 120M", MAPA_INFO_X + 5, MAPA_INFO_Y + 63,
-                      TamanoTextoPipBoy::Normal);
-  escribirTextoPipBoy("ZOOM: X2", MAPA_INFO_X + 5, MAPA_INFO_Y + 77,
-                      TamanoTextoPipBoy::Normal);
+  escribirTextoMapaCompacto("Lugar: Zona15", MAPA_INFO_X + 5,
+                             MAPA_INFO_Y + 29, VERDE_PIPBOY);
+  escribirTextoMapaCompacto("Tipo: Base", MAPA_INFO_X + 5,
+                             MAPA_INFO_Y + 40, VERDE_PIPBOY);
+  escribirTextoMapaCompacto("Dist: 120m", MAPA_INFO_X + 5,
+                             MAPA_INFO_Y + 51, VERDE_PIPBOY);
+  escribirTextoMapaCompacto("Zoom: x2", MAPA_INFO_X + 5,
+                             MAPA_INFO_Y + 62, VERDE_PIPBOY);
 
-  pantalla.setTextColor(VERDE_PIPBOY);
-  escribirTextoPipBoy("POI", MAPA_INFO_X + 5, MAPA_INFO_Y + 100,
-                      TamanoTextoPipBoy::Normal);
-  const int iconoY = MAPA_INFO_Y + 116;
-  dibujarIconoJugadorMapa(MAPA_INFO_X + 11, iconoY, VERDE_PIPBOY);
-  dibujarIconoCasaMapa(MAPA_INFO_X + 32, iconoY, VERDE_ATENUADO);
-  dibujarIconoTallerMapa(MAPA_INFO_X + 53, iconoY, VERDE_ATENUADO);
-  dibujarIconoClinicaMapa(MAPA_INFO_X + 74, iconoY, VERDE_ATENUADO);
-  dibujarIconoRadioMapa(MAPA_INFO_X + 95, iconoY, VERDE_ATENUADO);
+  const int iconoX = MAPA_INFO_X + 11;
+  const int etiquetaX = MAPA_INFO_X + 23;
+  dibujarIconoJugadorMapa(iconoX, MAPA_INFO_Y + 82, VERDE_PIPBOY);
+  escribirTextoMapaCompacto("= Jugador", etiquetaX, MAPA_INFO_Y + 78,
+                             VERDE_PIPBOY);
+  dibujarIconoCasaMapa(iconoX, MAPA_INFO_Y + 94, VERDE_ATENUADO);
+  escribirTextoMapaCompacto("= Base", etiquetaX, MAPA_INFO_Y + 90,
+                             VERDE_ATENUADO);
+  dibujarIconoTallerMapa(iconoX, MAPA_INFO_Y + 106, VERDE_ATENUADO);
+  escribirTextoMapaCompacto("= Taller", etiquetaX, MAPA_INFO_Y + 102,
+                             VERDE_ATENUADO);
+  dibujarIconoClinicaMapa(iconoX, MAPA_INFO_Y + 118, VERDE_ATENUADO);
+  escribirTextoMapaCompacto("= Clinica", etiquetaX, MAPA_INFO_Y + 114,
+                             VERDE_ATENUADO);
+  dibujarIconoRadioMapa(iconoX, MAPA_INFO_Y + 132, VERDE_ATENUADO);
+  escribirTextoMapaCompacto("= Radio", etiquetaX, MAPA_INFO_Y + 128,
+                             VERDE_ATENUADO);
 }
 
 void dibujarBitmapMapa() {
@@ -1327,6 +1351,7 @@ void dibujarBitmapMapa() {
   if (bitmap != nullptr) {
     dibujarBitmapMapaEscalado(bitmap);
   }
+  dibujarMarcadoresPruebaMapa();
   dibujarCruzMapa();
   dibujarMarcoMapa();
 }
