@@ -45,11 +45,12 @@ central se redibuja únicamente cuando cambia el minuto.
 
 ### MAP: cliente HTTPS
 
-`MAP` descarga un bitmap monocromo `PBM1` de `160×120` desde
-`https://pipboy.onix-software.com/map.php`. La descarga se ejecuta en una tarea
-de FreeRTOS del núcleo 0; el `loop()` conserva el touch, la navegación y las
-animaciones sin bloquearse. El buffer ocupa 2,412 bytes, incluida la cabecera,
-y se dibuja directamente en verde con `drawBitmap()`.
+`MAP` descarga el PNG original de Mapbox en `205×144` desde
+`https://pipboy.onix-software.com/map.php`. PHP lo entrega byte por byte, sin
+umbral, conversión monocroma, recoloración ni escalado. La descarga se ejecuta
+en una tarea de FreeRTOS del núcleo 0; el `loop()` conserva el touch, la
+navegación y las animaciones sin bloquearse. PNGdec lo decodifica por líneas
+al formato RGB565 que necesita el ST7789, sin framebuffer completo ni filtros.
 
 La conexión valida TLS contra `ISRG Root X1` (Let's Encrypt). No usa
 `setInsecure()` ni requiere bibliotecas externas.
@@ -68,9 +69,9 @@ invocar `solicitarActualizacion(latitud, longitud, zoom)` con datos reales.
 
 ## Dependencia adicional
 
-Instala **AnimatedGIF** de Larry Bank desde el gestor de bibliotecas de
-Arduino. El GIF se decodifica por lineas directamente sobre el ST7789, sin un
-framebuffer completo en RAM.
+Instala **AnimatedGIF** de Larry Bank y **PNGdec** de bitbank2 desde el gestor
+de bibliotecas de Arduino. Ambos recursos se decodifican por líneas
+directamente sobre el ST7789, sin un framebuffer completo en RAM.
 
 ## Recurso animado
 

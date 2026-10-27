@@ -1,13 +1,14 @@
 # Servicio de mapa Pip-Boy
 
-Endpoint PHP sin framework que consulta una imagen estática de Mapbox, la
-convierte a un bitmap monocromo de 1 bit y la entrega en un formato que el
-ESP32 puede dibujar sin decodificar PNG o JPEG.
+Endpoint PHP sin framework que consulta una imagen estática PNG de Mapbox y
+la entrega al ESP32 sin modificarla. No aplica umbral, conversión a un bit,
+recoloración, escalado ni una nueva codificación: el cuerpo de la respuesta
+contiene exactamente los bytes PNG recibidos desde Mapbox.
 
 ## Requisitos del hosting
 
 - PHP 7.4 o posterior.
-- Extensiones `curl` y `gd` habilitadas.
+- Extensión `curl` habilitada. GD ya no es necesaria.
 - HTTPS válido en `pipboy.onix-software.com`.
 - El document root del subdominio debe ser la carpeta `public/` de este
   proyecto, no la carpeta raíz `pipboy-map-api/`.
@@ -48,7 +49,7 @@ hosting no ofrece una alternativa cifrada.
 ## Solicitud del ESP32
 
 ```text
-GET /map.php?lat=19.4326&lon=-99.1332&z=16&size=160x120
+GET /map.php?lat=19.4326&lon=-99.1332&z=15&size=205x144
 Host: pipboy.onix-software.com
 X-Pipboy-Key: <device_api_key>
 ```
@@ -58,55 +59,32 @@ Parámetros:
 - `lat`: latitud entre -90 y 90 (obligatorio).
 - `lon`: longitud entre -180 y 180 (obligatorio).
 - `z`: zoom entero permitido por `config.php`; por defecto 16.
-- `size`: `160x120` (por defecto) o `304x184`.
+- `size`: `205x144` (predeterminado), `160x120` o `304x184`.
 
-Una solicitud correcta devuelve `200` y
-`Content-Type: application/vnd.pipboy.map; version=1`. Los fallos devuelven
-JSON mínimo con códigos `401`, `422`, `502` o `500`; no se revela la clave ni
-la respuesta del proveedor.
+Una solicitud correcta devuelve `200`, `Content-Type: image/png` y el PNG
+crudo recibido de Mapbox. Los fallos devuelven JSON mínimo con códigos `401`,
+`422`, `502` o `500`; no se revela la clave ni la respuesta del proveedor.
 
-## Formato `PBM1`
-
-El cuerpo contiene 12 bytes de cabecera y los píxeles empaquetados. Cada bit
-en `1` representa un píxel verde y cada bit en `0` uno negro.
-
-| Desplazamiento | Longitud | Contenido |
-| --- | ---: | --- |
-| 0 | 4 | ASCII `PBM1` |
-| 4 | 2 | ancho, `uint16` little-endian |
-| 6 | 2 | alto, `uint16` little-endian |
-| 8 | 2 | bytes por fila, `uint16` little-endian |
-| 10 | 1 | formato `1`: 1 bit por píxel, MSB primero |
-| 11 | 1 | reservado, `0` |
-| 12 | variable | píxeles empaquetados por fila |
-
-El tamaño de `160x120` ocupa 2,412 bytes en total (cabecera incluida). El de
-`304x184` ocupa 7,004 bytes. El mapa se guarda en caché siete días, agrupando
-coordenadas a cuatro decimales para reducir peticiones al proveedor.
+El mapa se guarda en caché siete días, agrupando coordenadas a cuatro
+decimales para reducir peticiones al proveedor. La caché almacena el mismo PNG
+sin alterarlo. Una entrada creada por la versión PBM1 anterior no se reutiliza.
 
 ## Atribución
 
-El endpoint solicita la imagen sin logo ni texto superpuesto para no perder
-legibilidad al convertirla a 1 bit. Por ello envía la atribución configurada
-en la cabecera `X-Pipboy-Attribution`. El firmware debe mostrar la atribución
-configurada siempre que visualice el mapa; revisa las fuentes finales del
-estilo por si Mapbox exige texto adicional. La caché incorpora el propietario
-y el ID del estilo: al publicar un estilo distinto se crea automáticamente un
-bitmap nuevo, sin reutilizar el generado por el estilo anterior.
-La conversión usa el contraste de cada imagen para conservar líneas
-antialiasadas del estilo publicado; una imagen sin contraste se mantiene negra
-en vez de llenar la pantalla de ruido.
+El endpoint solicita la imagen sin logo ni texto superpuesto y envía la
+atribución configurada en la cabecera `X-Pipboy-Attribution`. El firmware debe
+mostrar la atribución configurada siempre que visualice el mapa; revisa las
+fuentes finales del estilo por si Mapbox exige texto adicional. La caché
+incorpora el propietario y el ID del estilo: al publicar un estilo distinto se
+crea automáticamente una imagen nueva, sin reutilizar la anterior.
 
-Cada imagen PNG original descargada de Mapbox se guarda antes de convertirla
-en `public/images/`. Después se crea una segunda captura del resultado PBM1,
-con fondo negro y píxeles verdes, que coincide exactamente con el mapa que
-recibe la ESP32. Por ejemplo:
+Cada imagen PNG descargada de Mapbox se guarda exactamente igual en
+`public/images/`, por ejemplo:
 
-- Original: `map_lat19_432600_lonm99_133200_z15_160x120.png`
-- Convertida: `map_lat19_432600_lonm99_133200_z15_160x120_processed.png`
+`map_lat19_432600_lonm99_133200_z15_205x144.png`
 
-Una nueva descarga para esa misma zona sustituye ambas capturas. Estos PNG son
-públicos bajo el subdominio, por lo que no contienen tokens ni datos privados.
+No se generan imágenes `_processed.png`. Los PNG públicos bajo el subdominio
+no contienen tokens ni datos privados.
 
 Mapbox puede conservar una versión de un estilo en la CDN de Static Images
 hasta 12 horas después de publicarlo. Si necesitas que una revisión visual

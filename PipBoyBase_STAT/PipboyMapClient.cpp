@@ -63,6 +63,7 @@ void PipboyMapClient::iniciar(const Configuracion &configuracion) {
   _forzarSolicitud = false;
   _mapaDisponible = false;
   _mapaNuevo = false;
+  _bytesImagen = 0;
   _ultimoMapaMs = 0;
   _proximoIntentoMs = 0;
   portEXIT_CRITICAL(&_mutex);
@@ -129,8 +130,12 @@ bool PipboyMapClient::hayMapaDisponible() const { return _mapaDisponible; }
 
 bool PipboyMapClient::hayMapaNuevo() const { return _mapaNuevo; }
 
-const uint8_t *PipboyMapClient::bitmap() const {
-  return _mapaDisponible ? _respuesta + CABECERA_BYTES : nullptr;
+const uint8_t *PipboyMapClient::imagenPng() const {
+  return _mapaDisponible ? _respuesta : nullptr;
+}
+
+size_t PipboyMapClient::bytesImagenPng() const {
+  return _mapaDisponible ? _bytesImagen : 0;
 }
 
 void PipboyMapClient::confirmarMapaDibujado() { _mapaNuevo = false; }
@@ -147,8 +152,7 @@ const char *PipboyMapClient::textoEstado() const {
     case Estado::ErrorWifi: return "ERROR WIFI / REINTENTO";
     case Estado::ErrorTls: return "ERROR TLS / REINTENTO";
     case Estado::ErrorHttp: return "ERROR API / REINTENTO";
-    case Estado::ErrorFormato: return "MAPA INVALIDO / REINTENTO";
-    case Estado::ErrorSinDetalle: return "MAPA SIN DETALLE / REINTENTO";
+    case Estado::ErrorFormato: return "PNG INVALIDO / REINTENTO";
     case Estado::ErrorMemoria: return "ERROR TAREA / REINTENTO";
   }
   return "ESTADO DESCONOCIDO";
@@ -189,7 +193,8 @@ void PipboyMapClient::descargarEnSegundoPlano() {
 
   String url = String(_configuracion.urlEndpoint) + "?lat=" +
                String(_latitud, 6) + "&lon=" + String(_longitud, 6) +
-               "&z=" + String(_zoom) + "&size=160x120";
+               "&z=" + String(_zoom) + "&size=" + String(ANCHO_MAPA) +
+               "x" + String(ALTO_MAPA);
 
   HTTPClient http;
   http.setConnectTimeout(_configuracion.timeoutHttpMs);
@@ -208,7 +213,9 @@ void PipboyMapClient::descargarEnSegundoPlano() {
     terminarConError(Estado::ErrorTls);
     return;
   }
-  if (codigoHttp != HTTP_CODE_OK || http.getSize() != RESPUESTA_BYTES) {
+  const int bytesEsperados = http.getSize();
+  if (codigoHttp != HTTP_CODE_OK || bytesEsperados < 24 ||
+      bytesEsperados > static_cast<int>(MAX_PNG_BYTES)) {
     http.end();
     terminarConError(Estado::ErrorHttp);
     return;
@@ -217,10 +224,11 @@ void PipboyMapClient::descargarEnSegundoPlano() {
   WiFiClient *flujo = http.getStreamPtr();
   size_t recibidos = 0;
   uint32_t ultimoByteMs = millis();
-  while (recibidos < RESPUESTA_BYTES) {
+  while (recibidos < static_cast<size_t>(bytesEsperados)) {
     const size_t disponibles = flujo->available();
     if (disponibles > 0) {
-      const size_t porLeer = min(disponibles, RESPUESTA_BYTES - recibidos);
+      const size_t porLeer =
+          min(disponibles, static_cast<size_t>(bytesEsperados) - recibidos);
       const size_t leidos = flujo->readBytes(_respuesta + recibidos, porLeer);
       if (leidos == 0) break;
       recibidos += leidos;
@@ -236,18 +244,12 @@ void PipboyMapClient::descargarEnSegundoPlano() {
   }
   http.end();
 
-  if (recibidos != RESPUESTA_BYTES || !validarRespuesta()) {
+  if (recibidos != static_cast<size_t>(bytesEsperados) ||
+      !validarRespuesta(recibidos)) {
     terminarConError(Estado::ErrorFormato);
     return;
   }
-  if (!respuestaTieneDetalle()) {
-    // La cabecera puede ser válida mientras la CDN de Mapbox todavía entrega
-    // un estilo sin trazos. No se acepta como mapa listo: se reintentará con
-    // el intervalo corto configurado, sin bloquear la interfaz.
-    terminarConError(Estado::ErrorSinDetalle);
-    return;
-  }
-  terminarConMapa();
+  terminarConMapa(recibidos);
 }
 
 void PipboyMapClient::terminarConError(Estado error) {
@@ -263,7 +265,7 @@ void PipboyMapClient::terminarConError(Estado error) {
   portEXIT_CRITICAL(&_mutex);
 }
 
-void PipboyMapClient::terminarConMapa() {
+void PipboyMapClient::terminarConMapa(size_t bytesImagen) {
   if (_configuracion.desconectarWifiTrasDescarga) {
     WiFi.disconnect(false, false);
     WiFi.mode(WIFI_OFF);
@@ -272,6 +274,7 @@ void PipboyMapClient::terminarConMapa() {
   portENTER_CRITICAL(&_mutex);
   _ultimoMapaMs = millis();
   _proximoIntentoMs = 0;
+  _bytesImagen = bytesImagen;
   _solicitudPendiente = false;
   _forzarSolicitud = false;
   _mapaDisponible = true;
@@ -292,28 +295,25 @@ bool PipboyMapClient::debeActualizar(uint32_t ahora) const {
          ahora - _ultimoMapaMs >= _configuracion.intervaloActualizacionMs;
 }
 
-bool PipboyMapClient::validarRespuesta() const {
-  if (_respuesta[0] != 'P' || _respuesta[1] != 'B' ||
-      _respuesta[2] != 'M' || _respuesta[3] != '1') {
+bool PipboyMapClient::validarRespuesta(size_t bytesImagen) const {
+  if (bytesImagen < 24 || _respuesta[0] != 0x89 || _respuesta[1] != 'P' ||
+      _respuesta[2] != 'N' || _respuesta[3] != 'G' ||
+      _respuesta[4] != 0x0D || _respuesta[5] != 0x0A ||
+      _respuesta[6] != 0x1A || _respuesta[7] != 0x0A ||
+      _respuesta[12] != 'I' || _respuesta[13] != 'H' ||
+      _respuesta[14] != 'D' || _respuesta[15] != 'R') {
     return false;
   }
 
-  const uint16_t ancho = _respuesta[4] | (_respuesta[5] << 8);
-  const uint16_t alto = _respuesta[6] | (_respuesta[7] << 8);
-  const uint16_t bytesFila = _respuesta[8] | (_respuesta[9] << 8);
-  return ancho == ANCHO_MAPA && alto == ALTO_MAPA &&
-         bytesFila == BYTES_POR_FILA && _respuesta[10] == 1 &&
-         _respuesta[11] == 0;
-}
-
-bool PipboyMapClient::respuestaTieneDetalle() const {
-  for (size_t indice = CABECERA_BYTES; indice < RESPUESTA_BYTES; indice++) {
-    if (_respuesta[indice] != 0) {
-      return true;
-    }
-  }
-
-  return false;
+  const uint32_t ancho = (static_cast<uint32_t>(_respuesta[16]) << 24) |
+                         (static_cast<uint32_t>(_respuesta[17]) << 16) |
+                         (static_cast<uint32_t>(_respuesta[18]) << 8) |
+                         _respuesta[19];
+  const uint32_t alto = (static_cast<uint32_t>(_respuesta[20]) << 24) |
+                        (static_cast<uint32_t>(_respuesta[21]) << 16) |
+                        (static_cast<uint32_t>(_respuesta[22]) << 8) |
+                        _respuesta[23];
+  return ancho == ANCHO_MAPA && alto == ALTO_MAPA;
 }
 
 bool PipboyMapClient::tiempoAlcanzado(uint32_t ahora, uint32_t objetivo) {
