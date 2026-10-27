@@ -1169,13 +1169,11 @@ void dibujarSelectorMapa() {
       MAPA_SELECTOR_TEXTO_Y, TamanoTextoPipBoy::Normal);
 }
 
+void dibujarIconoJugadorMapa(int x, int y, uint8_t escala, uint16_t color);
+
 void dibujarCruzMapa() {
-  pantalla.drawFastHLine(MAPA_CENTRO_X - 7, MAPA_CENTRO_Y, 15,
-                         VERDE_BRILLO);
-  pantalla.drawFastVLine(MAPA_CENTRO_X, MAPA_CENTRO_Y - 7, 15,
-                         VERDE_BRILLO);
-  pantalla.drawRect(MAPA_CENTRO_X - 2, MAPA_CENTRO_Y - 2, 5, 5,
-                    VERDE_PIPBOY);
+  dibujarIconoJugadorMapa(MAPA_CENTRO_X - 12, MAPA_CENTRO_Y - 12, 1,
+                          VERDE_BRILLO);
 }
 
 void dibujarReticulaMapa() {
@@ -1245,39 +1243,140 @@ void dibujarBitmapMapaEscalado(const uint8_t *bitmap) {
   pantalla.endWrite();
 }
 
-void dibujarIconoJugadorMapa(int x, int y, uint16_t color) {
+void dibujarIconoJugadorMapaCompacto(int x, int y, uint16_t color) {
   pantalla.drawCircle(x, y, 4, color);
   pantalla.drawFastHLine(x - 6, y, 13, color);
   pantalla.drawFastVLine(x, y - 6, 13, color);
 }
 
-void dibujarIconoCasaMapa(int x, int y, uint16_t color) {
+void dibujarIconoCasaMapaCompacto(int x, int y, uint16_t color) {
   pantalla.drawRect(x - 4, y - 1, 9, 7, color);
   pantalla.drawLine(x - 5, y - 1, x, y - 6, color);
   pantalla.drawLine(x, y - 6, x + 5, y - 1, color);
   pantalla.drawFastVLine(x + 1, y + 2, 3, color);
 }
 
-void dibujarIconoTallerMapa(int x, int y, uint16_t color) {
+void dibujarIconoTallerMapaCompacto(int x, int y, uint16_t color) {
   pantalla.drawCircle(x - 3, y - 3, 3, color);
   pantalla.drawFastHLine(x - 6, y - 3, 3, ST77XX_BLACK);
   pantalla.drawLine(x - 1, y - 1, x + 5, y + 5, color);
   pantalla.drawLine(x + 5, y - 1, x - 1, y + 5, color);
 }
 
-void dibujarIconoClinicaMapa(int x, int y, uint16_t color) {
+void dibujarIconoClinicaMapaCompacto(int x, int y, uint16_t color) {
   pantalla.drawRect(x - 5, y - 5, 11, 11, color);
   pantalla.drawFastHLine(x - 3, y, 7, color);
   pantalla.drawFastVLine(x, y - 3, 7, color);
 }
 
-void dibujarIconoRadioMapa(int x, int y, uint16_t color) {
+void dibujarIconoRadioMapaCompacto(int x, int y, uint16_t color) {
   pantalla.drawFastVLine(x, y - 5, 9, color);
   pantalla.drawLine(x, y - 5, x - 3, y - 1, color);
   pantalla.drawLine(x, y - 5, x + 3, y - 1, color);
   pantalla.drawFastHLine(x - 5, y + 5, 11, color);
   pantalla.drawLine(x - 6, y - 4, x - 8, y, color);
   pantalla.drawLine(x + 6, y - 4, x + 8, y, color);
+}
+
+void dibujarLineaIconoMapa(int baseX, int baseY, int x, int y, int x2,
+                            int y2, uint16_t color, uint8_t escala) {
+  int deltaX = abs(x2 - x);
+  const int pasoX = x < x2 ? 1 : -1;
+  int deltaY = -abs(y2 - y);
+  const int pasoY = y < y2 ? 1 : -1;
+  int error = deltaX + deltaY;
+
+  while (true) {
+    pantalla.fillRect(baseX + (x * escala), baseY + (y * escala), escala,
+                      escala, color);
+    if (x == x2 && y == y2) break;
+    const int errorDoble = 2 * error;
+    if (errorDoble >= deltaY) {
+      error += deltaY;
+      x += pasoX;
+    }
+    if (errorDoble <= deltaX) {
+      error += deltaX;
+      y += pasoY;
+    }
+  }
+}
+
+// Iconos detallados de 24 x 24, adaptados a Adafruit_ST7789. "x" e "y"
+// siempre son el origen final en pantalla, incluso cuando escala es 2.
+void dibujarIconoJugadorMapa(int x, int y, uint8_t escala, uint16_t color) {
+  const int centroX = x + (12 * escala);
+  const int centroY = y + (12 * escala);
+  pantalla.drawCircle(centroX, centroY, 7 * escala, color);
+  pantalla.fillRect(centroX - escala, y, 2 * escala, 7 * escala, color);
+  pantalla.fillRect(centroX - escala, y + (17 * escala), 2 * escala,
+                    7 * escala, color);
+  pantalla.fillRect(x, centroY - escala, 7 * escala, 2 * escala, color);
+  pantalla.fillRect(x + (17 * escala), centroY - escala, 7 * escala,
+                    2 * escala, color);
+  pantalla.fillRect(centroX - escala, centroY - escala, 2 * escala,
+                    2 * escala, color);
+}
+
+void dibujarIconoCasaMapa(int x, int y, uint8_t escala, uint16_t color) {
+  for (int fila = 0; fila < 11; fila++) {
+    pantalla.fillRect(x + ((11 - fila) * escala), y + ((2 + fila) * escala),
+                      (2 * fila + 2) * escala, escala, color);
+  }
+  pantalla.fillRect(x + (4 * escala), y + (12 * escala), 16 * escala,
+                    11 * escala, color);
+  pantalla.fillRect(x + (10 * escala), y + (16 * escala), 5 * escala,
+                    7 * escala, ST77XX_BLACK);
+}
+
+void dibujarIconoTallerMapa(int x, int y, uint8_t escala, uint16_t color) {
+  const int centroX = x + (12 * escala);
+  const int centroY = y + (12 * escala);
+  pantalla.fillRect(x + (9 * escala), y, 6 * escala, 6 * escala, color);
+  pantalla.fillRect(x + (9 * escala), y + (18 * escala), 6 * escala,
+                    6 * escala, color);
+  pantalla.fillRect(x, y + (9 * escala), 6 * escala, 6 * escala, color);
+  pantalla.fillRect(x + (18 * escala), y + (9 * escala), 6 * escala,
+                    6 * escala, color);
+  pantalla.fillRect(x + (3 * escala), y + (3 * escala), 5 * escala,
+                    5 * escala, color);
+  pantalla.fillRect(x + (16 * escala), y + (3 * escala), 5 * escala,
+                    5 * escala, color);
+  pantalla.fillRect(x + (3 * escala), y + (16 * escala), 5 * escala,
+                    5 * escala, color);
+  pantalla.fillRect(x + (16 * escala), y + (16 * escala), 5 * escala,
+                    5 * escala, color);
+  pantalla.fillCircle(centroX, centroY, 9 * escala, color);
+  pantalla.fillCircle(centroX, centroY, 4 * escala, ST77XX_BLACK);
+}
+
+void dibujarIconoClinicaMapa(int x, int y, uint8_t escala, uint16_t color) {
+  pantalla.drawRect(x, y, 24 * escala, 24 * escala, color);
+  pantalla.drawRect(x + escala, y + escala, 22 * escala, 22 * escala,
+                    color);
+  pantalla.fillRect(x + (10 * escala), y + (5 * escala), 4 * escala,
+                    14 * escala, color);
+  pantalla.fillRect(x + (5 * escala), y + (10 * escala), 14 * escala,
+                    4 * escala, color);
+}
+
+void dibujarIconoRadioMapa(int x, int y, uint8_t escala, uint16_t color) {
+  const int centroX = x + (12 * escala);
+  pantalla.fillCircle(centroX, y + (7 * escala), 2 * escala, color);
+  dibujarLineaIconoMapa(x, y, 7, 3, 4, 6, color, escala);
+  dibujarLineaIconoMapa(x, y, 4, 6, 7, 11, color, escala);
+  dibujarLineaIconoMapa(x, y, 4, 0, 1, 5, color, escala);
+  dibujarLineaIconoMapa(x, y, 1, 5, 5, 14, color, escala);
+  dibujarLineaIconoMapa(x, y, 17, 3, 20, 6, color, escala);
+  dibujarLineaIconoMapa(x, y, 20, 6, 17, 11, color, escala);
+  dibujarLineaIconoMapa(x, y, 20, 0, 23, 5, color, escala);
+  dibujarLineaIconoMapa(x, y, 23, 5, 19, 14, color, escala);
+  pantalla.fillTriangle(centroX, y + (10 * escala), x + (5 * escala),
+                       y + (23 * escala), x + (19 * escala),
+                       y + (23 * escala), color);
+  pantalla.fillTriangle(centroX, y + (15 * escala), x + (9 * escala),
+                       y + (21 * escala), x + (15 * escala),
+                       y + (21 * escala), ST77XX_BLACK);
 }
 
 void escribirTextoMapaCompacto(const char *texto, int16_t x, int16_t y,
@@ -1295,10 +1394,10 @@ void escribirTextoMapaCompacto(const char *texto, int16_t x, int16_t y,
 void dibujarMarcadoresPruebaMapa() {
   // Datos decorativos de prueba, separados de la imagen real del endpoint.
   // Se reemplazaran por marcadores descubiertos y seleccionables mas adelante.
-  dibujarIconoCasaMapa(MAPA_X + 36, MAPA_Y + 34, VERDE_PIPBOY);
-  dibujarIconoClinicaMapa(MAPA_X + 142, MAPA_Y + 31, VERDE_PIPBOY);
-  dibujarIconoTallerMapa(MAPA_X + 163, MAPA_Y + 104, VERDE_ATENUADO);
-  dibujarIconoRadioMapa(MAPA_X + 27, MAPA_Y + 112, VERDE_ATENUADO);
+  dibujarIconoCasaMapa(MAPA_X + 25, MAPA_Y + 20, 1, VERDE_PIPBOY);
+  dibujarIconoClinicaMapa(MAPA_X + 143, MAPA_Y + 18, 1, VERDE_PIPBOY);
+  dibujarIconoTallerMapa(MAPA_X + 165, MAPA_Y + 94, 1, VERDE_ATENUADO);
+  dibujarIconoRadioMapa(MAPA_X + 15, MAPA_Y + 106, 1, VERDE_ATENUADO);
 }
 
 void dibujarPanelInformacionMapa() {
@@ -1325,19 +1424,22 @@ void dibujarPanelInformacionMapa() {
 
   const int iconoX = MAPA_INFO_X + 11;
   const int etiquetaX = MAPA_INFO_X + 23;
-  dibujarIconoJugadorMapa(iconoX, MAPA_INFO_Y + 82, VERDE_PIPBOY);
+  dibujarIconoJugadorMapaCompacto(iconoX, MAPA_INFO_Y + 82, VERDE_PIPBOY);
   escribirTextoMapaCompacto("= Jugador", etiquetaX, MAPA_INFO_Y + 78,
                              VERDE_PIPBOY);
-  dibujarIconoCasaMapa(iconoX, MAPA_INFO_Y + 94, VERDE_ATENUADO);
+  dibujarIconoCasaMapaCompacto(iconoX, MAPA_INFO_Y + 94, VERDE_ATENUADO);
   escribirTextoMapaCompacto("= Base", etiquetaX, MAPA_INFO_Y + 90,
                              VERDE_ATENUADO);
-  dibujarIconoTallerMapa(iconoX, MAPA_INFO_Y + 106, VERDE_ATENUADO);
+  dibujarIconoTallerMapaCompacto(iconoX, MAPA_INFO_Y + 106,
+                                 VERDE_ATENUADO);
   escribirTextoMapaCompacto("= Taller", etiquetaX, MAPA_INFO_Y + 102,
                              VERDE_ATENUADO);
-  dibujarIconoClinicaMapa(iconoX, MAPA_INFO_Y + 118, VERDE_ATENUADO);
+  dibujarIconoClinicaMapaCompacto(iconoX, MAPA_INFO_Y + 118,
+                                  VERDE_ATENUADO);
   escribirTextoMapaCompacto("= Clinica", etiquetaX, MAPA_INFO_Y + 114,
                              VERDE_ATENUADO);
-  dibujarIconoRadioMapa(iconoX, MAPA_INFO_Y + 132, VERDE_ATENUADO);
+  dibujarIconoRadioMapaCompacto(iconoX, MAPA_INFO_Y + 132,
+                                VERDE_ATENUADO);
   escribirTextoMapaCompacto("= Radio", etiquetaX, MAPA_INFO_Y + 128,
                              VERDE_ATENUADO);
 }
