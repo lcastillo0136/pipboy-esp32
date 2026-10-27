@@ -3,17 +3,26 @@
 declare(strict_types=1);
 
 /**
- * Static PNG map endpoint for the Pip-Boy ESP32.
+ * Static, one-bit map endpoint for the Pip-Boy ESP32.
  *
- * The endpoint returns the exact PNG bytes received from Mapbox. It never
- * thresholds, recolors, re-encodes, resizes, or otherwise processes pixels.
+ * The response format is intentionally decoder-free on the device:
+ *
+ *   Offset  Length  Value
+ *   0       4       ASCII "PBM1"
+ *   4       2       width, unsigned little-endian
+ *   6       2       height, unsigned little-endian
+ *   8       2       bytes per row, unsigned little-endian
+ *   10      1       pixel format: 1 = packed 1-bit, MSB first
+ *   11      1       reserved (0)
+ *   12      N       pixels, 1 = foreground green, 0 = black
  */
 final class PipboyMapEndpoint
 {
+    private const HEADER_LENGTH = 12;
     private const MAX_UPSTREAM_BYTES = 2097152;
-    // Separa las entradas PNG crudas de la caché PBM1 usada por versiones
-    // anteriores del endpoint.
-    private const RAW_PNG_CACHE_VERSION = '1';
+    // Cambiar esta version fuerza un bitmap nuevo si evoluciona el algoritmo
+    // de conversión, sin reutilizar una caché de otra representación visual.
+    private const BITMAP_CONVERSION_VERSION = '4';
 
     public static function run(string $configPath): void
     {
@@ -24,15 +33,28 @@ final class PipboyMapEndpoint
 
             $request = self::parseRequest($config);
             $cacheFile = self::cachePath($config, $request);
-            $image = self::readFreshCache($cacheFile, $config);
+            $payload = self::readFreshCache($cacheFile, $config);
 
-            if ($image === null) {
+            if ($payload === null) {
                 $image = self::fetchMapboxImage($config, $request);
                 self::saveSourceImage($image, $request);
-                self::writeCache($cacheFile, $image);
+                $payload = self::convertToPackedBitmap(
+                    $image,
+                    $request['width'],
+                    $request['height']
+                );
+                self::saveProcessedImage($payload, $request);
+
+                // Los nodos CDN de Mapbox pueden servir temporalmente la
+                // versión previa de un estilo. Si esa imagen no contiene
+                // trazos, no se conserva: la siguiente consulta podrá
+                // recuperar el mapa en cuanto la propagación concluya.
+                if (self::hasForegroundPixels($payload)) {
+                    self::writeCache($cacheFile, $payload);
+                }
             }
 
-            self::sendMap($image, $config['attribution']);
+            self::sendMap($payload, $config['attribution']);
         } catch (PipboyMapHttpException $exception) {
             self::sendError($exception->getStatusCode(), $exception->getPublicMessage());
         } catch (Throwable $exception) {
@@ -84,7 +106,8 @@ final class PipboyMapEndpoint
             throw new PipboyMapHttpException(500, 'server_not_configured');
         }
 
-        if (!function_exists('curl_init')) {
+        if (!function_exists('curl_init') || !function_exists('imagecreatefromstring') ||
+            !function_exists('imagecreatetruecolor') || !function_exists('imagepng')) {
             throw new PipboyMapHttpException(500, 'server_missing_extensions');
         }
 
@@ -179,9 +202,10 @@ final class PipboyMapEndpoint
         }
 
         $cacheKey = implode('|', array(
-            self::RAW_PNG_CACHE_VERSION,
+            self::BITMAP_CONVERSION_VERSION,
             // El estilo forma parte del resultado. Incluirlo invalida
-            // automáticamente las imágenes al publicar o sustituir el estilo.
+            // automaticamente los bitmaps creados antes de publicar o
+            // sustituir el estilo de Mapbox.
             (string) $config['mapbox_style_owner'],
             (string) $config['mapbox_style_id'],
             number_format(round($request['latitude'], 4), 4, '.', ''),
@@ -190,7 +214,7 @@ final class PipboyMapEndpoint
             $request['size_name'],
         ));
 
-        return rtrim($cacheDirectory, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . hash('sha256', $cacheKey) . '.png';
+        return rtrim($cacheDirectory, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . hash('sha256', $cacheKey) . '.pbm1';
     }
 
     private static function readFreshCache(string $cacheFile, array $config): ?string
@@ -204,12 +228,12 @@ final class PipboyMapEndpoint
             return null;
         }
 
-        $image = file_get_contents($cacheFile);
-        if ($image === false || !self::isPng($image)) {
+        $payload = file_get_contents($cacheFile);
+        if ($payload === false || strlen($payload) < self::HEADER_LENGTH || substr($payload, 0, 4) !== 'PBM1') {
             return null;
         }
 
-        return $image;
+        return self::hasForegroundPixels($payload) ? $payload : null;
     }
 
     private static function fetchMapboxImage(array $config, array $request): string
@@ -259,8 +283,7 @@ final class PipboyMapEndpoint
         $contentType = (string) curl_getinfo($curl, CURLINFO_CONTENT_TYPE);
         curl_close($curl);
 
-        if ($result === false || $statusCode < 200 || $statusCode >= 300 ||
-            stripos($contentType, 'image/') !== 0 || !self::isPng($responseBody)) {
+        if ($result === false || $statusCode < 200 || $statusCode >= 300 || stripos($contentType, 'image/') !== 0) {
             throw new PipboyMapHttpException(502, 'map_provider_unavailable');
         }
 
@@ -295,6 +318,57 @@ final class PipboyMapEndpoint
         }
     }
 
+    private static function saveProcessedImage(string $payload, array $request): void
+    {
+        $width = (int) $request['width'];
+        $height = (int) $request['height'];
+        $bytesPerRow = (int) ceil($width / 8);
+        $expectedLength = self::HEADER_LENGTH + ($bytesPerRow * $height);
+
+        if (strlen($payload) !== $expectedLength || substr($payload, 0, 4) !== 'PBM1') {
+            throw new PipboyMapHttpException(500, 'bitmap_conversion_failed');
+        }
+
+        $image = imagecreatetruecolor($width, $height);
+        if ($image === false) {
+            throw new PipboyMapHttpException(500, 'image_storage_unavailable');
+        }
+
+        $black = imagecolorallocate($image, 0, 0, 0);
+        $green = imagecolorallocate($image, 0, 255, 70);
+        imagefill($image, 0, 0, $black);
+
+        // Reconstruye el PNG desde el mismo PBM1 enviado a la placa. Es una
+        // captura fiel de la conversión, no una segunda interpretación del
+        // PNG de Mapbox ni del umbral de luminancia.
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $offset = self::HEADER_LENGTH + ($y * $bytesPerRow) + intdiv($x, 8);
+                if ((ord($payload[$offset]) & (0x80 >> ($x % 8))) !== 0) {
+                    imagesetpixel($image, $x, $y, $green);
+                }
+            }
+        }
+
+        $filename = sprintf(
+            'map_lat%s_lon%s_z%d_%dx%d_processed.png',
+            self::coordinateFilename((float) $request['latitude']),
+            self::coordinateFilename((float) $request['longitude']),
+            (int) $request['zoom'],
+            $width,
+            $height
+        );
+        $imagePath = self::imageDirectory() . DIRECTORY_SEPARATOR . $filename;
+        $temporaryPath = $imagePath . '.' . bin2hex(random_bytes(6)) . '.tmp';
+        $saved = imagepng($image, $temporaryPath, 9);
+        imagedestroy($image);
+
+        if (!$saved || !rename($temporaryPath, $imagePath)) {
+            @unlink($temporaryPath);
+            throw new PipboyMapHttpException(500, 'image_storage_unavailable');
+        }
+    }
+
     private static function imageDirectory(): string
     {
         $directory = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'images';
@@ -314,11 +388,108 @@ final class PipboyMapEndpoint
         );
     }
 
-    private static function isPng(string $image): bool
+    private static function convertToPackedBitmap(string $sourceImage, int $width, int $height): string
     {
-        return strlen($image) >= 24 &&
-            substr($image, 0, 8) === "\x89PNG\r\n\x1a\n" &&
-            substr($image, 12, 4) === 'IHDR';
+        $image = @imagecreatefromstring($sourceImage);
+        if ($image === false) {
+            throw new PipboyMapHttpException(502, 'invalid_map_image');
+        }
+
+        if (imagesx($image) !== $width || imagesy($image) !== $height) {
+            imagedestroy($image);
+            throw new PipboyMapHttpException(502, 'invalid_map_image');
+        }
+
+        // Mapbox puede responder un PNG indexado. En GD, imagecolorat()
+        // devuelve en ese caso el índice de la paleta, no un color RGB; sin
+        // convertirlo, los caminos se interpretan como negros y desaparecen
+        // al empaquetar el bitmap de 1 bit.
+        if (!imageistruecolor($image) && !imagepalettetotruecolor($image)) {
+            imagedestroy($image);
+            throw new PipboyMapHttpException(502, 'invalid_map_image');
+        }
+
+        $bytesPerRow = (int) ceil($width / 8);
+        $pixels = '';
+        $luminanciaMinima = 255.0;
+        $luminanciaMaxima = 0.0;
+
+        // Medimos el rango de luminosidad para distinguir una imagen vacía
+        // de una que sí contiene detalle del estilo de Mapbox.
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $rgba = imagecolorat($image, $x, $y);
+                $red = ($rgba >> 16) & 0xFF;
+                $green = ($rgba >> 8) & 0xFF;
+                $blue = $rgba & 0xFF;
+                $luminancia = (0.2126 * $red) + (0.7152 * $green) + (0.0722 * $blue);
+                $luminanciaMinima = min($luminanciaMinima, $luminancia);
+                $luminanciaMaxima = max($luminanciaMaxima, $luminancia);
+            }
+        }
+
+        $rangoLuminancia = $luminanciaMaxima - $luminanciaMinima;
+        // Una imagen de fondo uniforme permanece vacía. En el estilo actual,
+        // 40 conserva también las vialidades secundarias sin encender el
+        // fondo negro al convertir a un solo bit por píxel.
+        $umbral = $rangoLuminancia < 12.0
+            ? PHP_FLOAT_MAX
+            : 40.0;
+
+        for ($y = 0; $y < $height; $y++) {
+            $row = '';
+            $packedByte = 0;
+
+            for ($x = 0; $x < $width; $x++) {
+                $rgba = imagecolorat($image, $x, $y);
+                $red = ($rgba >> 16) & 0xFF;
+                $green = ($rgba >> 8) & 0xFF;
+                $blue = $rgba & 0xFF;
+                $alpha = ($rgba >> 24) & 0x7F;
+                $luminance = (0.2126 * $red) + (0.7152 * $green) + (0.0722 * $blue);
+
+                // El estilo es oscuro: se preservan las vías y detalles con
+                // contraste alto como píxeles de fósforo verde.
+                if ($alpha < 110 && $luminance >= $umbral) {
+                    $packedByte |= 1 << (7 - ($x % 8));
+                }
+
+                if (($x % 8) === 7) {
+                    $row .= chr($packedByte);
+                    $packedByte = 0;
+                }
+            }
+
+            if (($width % 8) !== 0) {
+                $row .= chr($packedByte);
+            }
+
+            if (strlen($row) !== $bytesPerRow) {
+                imagedestroy($image);
+                throw new PipboyMapHttpException(500, 'bitmap_conversion_failed');
+            }
+
+            $pixels .= $row;
+        }
+
+        imagedestroy($image);
+
+        return pack('a4vvvCC', 'PBM1', $width, $height, $bytesPerRow, 1, 0) . $pixels;
+    }
+
+    private static function hasForegroundPixels(string $payload): bool
+    {
+        if (strlen($payload) <= self::HEADER_LENGTH) {
+            return false;
+        }
+
+        for ($index = self::HEADER_LENGTH, $length = strlen($payload); $index < $length; $index++) {
+            if (ord($payload[$index]) !== 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function writeCache(string $cacheFile, string $payload): void
@@ -330,17 +501,17 @@ final class PipboyMapEndpoint
         }
     }
 
-    private static function sendMap(string $image, string $attribution): void
+    private static function sendMap(string $payload, string $attribution): void
     {
         $safeAttribution = str_replace(array("\r", "\n"), '', $attribution);
 
         http_response_code(200);
-        header('Content-Type: image/png');
-        header('Content-Length: ' . strlen($image));
+        header('Content-Type: application/vnd.pipboy.map; version=1');
+        header('Content-Length: ' . strlen($payload));
         header('Cache-Control: no-store');
         header('X-Content-Type-Options: nosniff');
         header('X-Pipboy-Attribution: ' . $safeAttribution);
-        echo $image;
+        echo $payload;
         exit;
     }
 

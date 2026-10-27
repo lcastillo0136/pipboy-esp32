@@ -28,10 +28,9 @@ return array(
     // becoming a general-purpose image proxy and bounds ESP32 RAM consumption.
     'allowed_sizes' => array(
         '160x120' => array(160, 120),
-        '205x144' => array(205, 144),
         '304x184' => array(304, 184),
     ),
-    'default_size' => '205x144',
+    'default_size' => '160x120',
     'default_zoom' => 16,
     'minimum_zoom' => 9,
     'maximum_zoom' => 18,

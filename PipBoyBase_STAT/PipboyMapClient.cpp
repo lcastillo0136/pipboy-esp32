@@ -1,7 +1,6 @@
 #include "PipboyMapClient.h"
 
 #include <HTTPClient.h>
-#include <SPIFFS.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
@@ -11,9 +10,6 @@ constexpr uint32_t TAREA_STACK_BYTES = 8192;
 constexpr UBaseType_t TAREA_PRIORIDAD = 1;
 constexpr BaseType_t TAREA_NUCLEO = 0;
 constexpr uint32_t LECTURA_INTERVALO_MS = 10;
-constexpr size_t BLOQUE_DESCARGA_BYTES = 512;
-constexpr char RUTA_MAPA_PNG[] = "/pipboy-map.png";
-constexpr char RUTA_MAPA_TEMPORAL[] = "/pipboy-map.tmp";
 
 // ISRG Root X1. La cadena HTTPS de pipboy.onix-software.com se verifico contra
 // esta raiz; conservarla en flash permite TLS real sin modo inseguro.
@@ -58,21 +54,13 @@ void PipboyMapClient::iniciar(const Configuracion &configuracion) {
                            textoConfigurado(configuracion.urlEndpoint) &&
                            textoConfigurado(configuracion.claveDispositivo) &&
                            textoConfigurado(configuracion.certificadoRaiz);
-  const bool almacenamientoDisponible = SPIFFS.begin(false);
-  if (almacenamientoDisponible) {
-    SPIFFS.remove(RUTA_MAPA_TEMPORAL);
-  }
   portENTER_CRITICAL(&_mutex);
   _configuracion = configuracion;
-  _estado = !configurado ? Estado::SinConfiguracion
-                          : (almacenamientoDisponible
-                                 ? Estado::EsperandoSolicitud
-                                 : Estado::ErrorAlmacenamiento);
+  _estado = configurado ? Estado::EsperandoSolicitud : Estado::SinConfiguracion;
   _wifiIniciado = false;
   _tareaActiva = false;
   _solicitudPendiente = false;
   _forzarSolicitud = false;
-  _almacenamientoDisponible = almacenamientoDisponible;
   _mapaDisponible = false;
   _mapaNuevo = false;
   _ultimoMapaMs = 0;
@@ -97,7 +85,7 @@ void PipboyMapClient::solicitarActualizacion(float latitud, float longitud,
 }
 
 void PipboyMapClient::actualizar() {
-  if (!estaConfigurado() || !_almacenamientoDisponible || _tareaActiva) return;
+  if (!estaConfigurado() || _tareaActiva) return;
 
   const uint32_t ahora = millis();
   if (!_solicitudPendiente && _mapaDisponible && debeActualizar(ahora)) {
@@ -141,8 +129,8 @@ bool PipboyMapClient::hayMapaDisponible() const { return _mapaDisponible; }
 
 bool PipboyMapClient::hayMapaNuevo() const { return _mapaNuevo; }
 
-const char *PipboyMapClient::rutaMapaPng() const {
-  return _mapaDisponible ? RUTA_MAPA_PNG : nullptr;
+const uint8_t *PipboyMapClient::bitmap() const {
+  return _mapaDisponible ? _respuesta + CABECERA_BYTES : nullptr;
 }
 
 void PipboyMapClient::confirmarMapaDibujado() { _mapaNuevo = false; }
@@ -159,8 +147,8 @@ const char *PipboyMapClient::textoEstado() const {
     case Estado::ErrorWifi: return "ERROR WIFI / REINTENTO";
     case Estado::ErrorTls: return "ERROR TLS / REINTENTO";
     case Estado::ErrorHttp: return "ERROR API / REINTENTO";
-    case Estado::ErrorFormato: return "PNG INVALIDO / REINTENTO";
-    case Estado::ErrorAlmacenamiento: return "ERROR SPIFFS / REINICIA";
+    case Estado::ErrorFormato: return "MAPA INVALIDO / REINTENTO";
+    case Estado::ErrorSinDetalle: return "MAPA SIN DETALLE / REINTENTO";
     case Estado::ErrorMemoria: return "ERROR TAREA / REINTENTO";
   }
   return "ESTADO DESCONOCIDO";
@@ -201,8 +189,7 @@ void PipboyMapClient::descargarEnSegundoPlano() {
 
   String url = String(_configuracion.urlEndpoint) + "?lat=" +
                String(_latitud, 6) + "&lon=" + String(_longitud, 6) +
-               "&z=" + String(_zoom) + "&size=" + String(ANCHO_MAPA) +
-               "x" + String(ALTO_MAPA);
+               "&z=" + String(_zoom) + "&size=160x120";
 
   HTTPClient http;
   http.setConnectTimeout(_configuracion.timeoutHttpMs);
@@ -221,39 +208,21 @@ void PipboyMapClient::descargarEnSegundoPlano() {
     terminarConError(Estado::ErrorTls);
     return;
   }
-  const int bytesEsperados = http.getSize();
-  if (codigoHttp != HTTP_CODE_OK || bytesEsperados < 24 ||
-      bytesEsperados > static_cast<int>(MAX_PNG_BYTES)) {
+  if (codigoHttp != HTTP_CODE_OK || http.getSize() != RESPUESTA_BYTES) {
     http.end();
     terminarConError(Estado::ErrorHttp);
     return;
   }
 
-  File archivoTemporal = SPIFFS.open(RUTA_MAPA_TEMPORAL, FILE_WRITE);
-  if (!archivoTemporal) {
-    http.end();
-    terminarConError(Estado::ErrorAlmacenamiento);
-    return;
-  }
-
   WiFiClient *flujo = http.getStreamPtr();
-  uint8_t bloque[BLOQUE_DESCARGA_BYTES];
   size_t recibidos = 0;
-  bool escrituraCorrecta = true;
   uint32_t ultimoByteMs = millis();
-  while (recibidos < static_cast<size_t>(bytesEsperados)) {
+  while (recibidos < RESPUESTA_BYTES) {
     const size_t disponibles = flujo->available();
     if (disponibles > 0) {
-      const size_t porLeer =
-          min(min(disponibles, BLOQUE_DESCARGA_BYTES),
-              static_cast<size_t>(bytesEsperados) - recibidos);
-      const size_t leidos = flujo->readBytes(
-          reinterpret_cast<char *>(bloque), porLeer);
+      const size_t porLeer = min(disponibles, RESPUESTA_BYTES - recibidos);
+      const size_t leidos = flujo->readBytes(_respuesta + recibidos, porLeer);
       if (leidos == 0) break;
-      if (archivoTemporal.write(bloque, leidos) != leidos) {
-        escrituraCorrecta = false;
-        break;
-      }
       recibidos += leidos;
       ultimoByteMs = millis();
       continue;
@@ -265,25 +234,17 @@ void PipboyMapClient::descargarEnSegundoPlano() {
     }
     vTaskDelay(pdMS_TO_TICKS(LECTURA_INTERVALO_MS));
   }
-  archivoTemporal.close();
   http.end();
 
-  if (!escrituraCorrecta) {
-    SPIFFS.remove(RUTA_MAPA_TEMPORAL);
-    terminarConError(Estado::ErrorAlmacenamiento);
-    return;
-  }
-  if (recibidos != static_cast<size_t>(bytesEsperados) ||
-      !validarArchivoMapa(recibidos)) {
-    SPIFFS.remove(RUTA_MAPA_TEMPORAL);
+  if (recibidos != RESPUESTA_BYTES || !validarRespuesta()) {
     terminarConError(Estado::ErrorFormato);
     return;
   }
-
-  if ((SPIFFS.exists(RUTA_MAPA_PNG) && !SPIFFS.remove(RUTA_MAPA_PNG)) ||
-      !SPIFFS.rename(RUTA_MAPA_TEMPORAL, RUTA_MAPA_PNG)) {
-    SPIFFS.remove(RUTA_MAPA_TEMPORAL);
-    terminarConError(Estado::ErrorAlmacenamiento);
+  if (!respuestaTieneDetalle()) {
+    // La cabecera puede ser válida mientras la CDN de Mapbox todavía entrega
+    // un estilo sin trazos. No se acepta como mapa listo: se reintentará con
+    // el intervalo corto configurado, sin bloquear la interfaz.
+    terminarConError(Estado::ErrorSinDetalle);
     return;
   }
   terminarConMapa();
@@ -331,36 +292,28 @@ bool PipboyMapClient::debeActualizar(uint32_t ahora) const {
          ahora - _ultimoMapaMs >= _configuracion.intervaloActualizacionMs;
 }
 
-bool PipboyMapClient::validarArchivoMapa(size_t bytesImagen) const {
-  if (bytesImagen < 24) {
+bool PipboyMapClient::validarRespuesta() const {
+  if (_respuesta[0] != 'P' || _respuesta[1] != 'B' ||
+      _respuesta[2] != 'M' || _respuesta[3] != '1') {
     return false;
   }
 
-  File archivoTemporal = SPIFFS.open(RUTA_MAPA_TEMPORAL, FILE_READ);
-  uint8_t cabecera[24] = {};
-  const size_t leidos = archivoTemporal
-                             ? archivoTemporal.read(cabecera, sizeof(cabecera))
-                             : 0;
-  if (archivoTemporal) {
-    archivoTemporal.close();
-  }
-  if (leidos != sizeof(cabecera) || cabecera[0] != 0x89 ||
-      cabecera[1] != 'P' || cabecera[2] != 'N' || cabecera[3] != 'G' ||
-      cabecera[4] != 0x0D || cabecera[5] != 0x0A || cabecera[6] != 0x1A ||
-      cabecera[7] != 0x0A || cabecera[12] != 'I' || cabecera[13] != 'H' ||
-      cabecera[14] != 'D' || cabecera[15] != 'R') {
-    return false;
+  const uint16_t ancho = _respuesta[4] | (_respuesta[5] << 8);
+  const uint16_t alto = _respuesta[6] | (_respuesta[7] << 8);
+  const uint16_t bytesFila = _respuesta[8] | (_respuesta[9] << 8);
+  return ancho == ANCHO_MAPA && alto == ALTO_MAPA &&
+         bytesFila == BYTES_POR_FILA && _respuesta[10] == 1 &&
+         _respuesta[11] == 0;
+}
+
+bool PipboyMapClient::respuestaTieneDetalle() const {
+  for (size_t indice = CABECERA_BYTES; indice < RESPUESTA_BYTES; indice++) {
+    if (_respuesta[indice] != 0) {
+      return true;
+    }
   }
 
-  const uint32_t ancho = (static_cast<uint32_t>(cabecera[16]) << 24) |
-                         (static_cast<uint32_t>(cabecera[17]) << 16) |
-                         (static_cast<uint32_t>(cabecera[18]) << 8) |
-                         cabecera[19];
-  const uint32_t alto = (static_cast<uint32_t>(cabecera[20]) << 24) |
-                        (static_cast<uint32_t>(cabecera[21]) << 16) |
-                        (static_cast<uint32_t>(cabecera[22]) << 8) |
-                        cabecera[23];
-  return ancho == ANCHO_MAPA && alto == ALTO_MAPA;
+  return false;
 }
 
 bool PipboyMapClient::tiempoAlcanzado(uint32_t ahora, uint32_t objetivo) {

@@ -2,8 +2,6 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <AnimatedGIF.h>
-#include <PNGdec.h>
-#include <SPIFFS.h>
 #include "PipboyMapClient.h"
 
 // 0: navegacion exclusiva por controles externos (valor predeterminado).
@@ -225,9 +223,6 @@ XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
 // para STAT. Asi no se duplica el buffer de trabajo en RAM.
 AnimatedGIF reproductorGif;
 PipboyMapClient clienteMapa;
-PNG decodificadorMapaPng;
-uint16_t lineaMapaPng[PipboyMapClient::ANCHO_MAPA];
-File archivoMapaPng;
 
 const char *pestanas[] = {"STAT", "INV", "DATA", "MAP", "RADIO"};
 int pestanaActual = 0;
@@ -1210,83 +1205,42 @@ void dibujarPlanoTecnicoMapa() {
                     MAPA_Y + MAPA_ALTO_DIBUJADO - 1, VERDE_OSCURO);
 }
 
-int dibujarLineaPngMapa(PNGDRAW *linea) {
-  if (linea->y < 0 || linea->y >= PipboyMapClient::ALTO_MAPA ||
-      linea->iWidth != PipboyMapClient::ANCHO_MAPA) {
-    return 0;
-  }
-
-  // PNGdec solo cambia el empaquetado al RGB565 requerido por el ST7789; no
-  // aplica umbrales, escalado, filtros ni modifica los pixeles de Mapbox.
-  decodificadorMapaPng.getLineAsRGB565(linea, lineaMapaPng,
-                                       PNG_RGB565_LITTLE_ENDIAN, 0x00000000);
-  pantalla.drawRGBBitmap(MAPA_X, MAPA_Y + linea->y, lineaMapaPng,
-                          linea->iWidth, 1);
-  return 1;
+bool pixelMapaActivo(const uint8_t *bitmap, uint16_t x, uint16_t y) {
+  const size_t indice =
+      (static_cast<size_t>(y) * PipboyMapClient::BYTES_POR_FILA) + (x / 8);
+  return (bitmap[indice] & (0x80 >> (x % 8))) != 0;
 }
 
-void *abrirArchivoMapaPng(const char *nombre, int32_t *bytes) {
-  (void)nombre;
-  const char *ruta = clienteMapa.rutaMapaPng();
-  if (ruta == nullptr) {
-    return nullptr;
-  }
-  if (archivoMapaPng) {
-    archivoMapaPng.close();
-  }
-  archivoMapaPng = SPIFFS.open(ruta, FILE_READ);
-  if (!archivoMapaPng) {
-    return nullptr;
-  }
-  *bytes = static_cast<int32_t>(archivoMapaPng.size());
-  return &archivoMapaPng;
-}
+void dibujarBitmapMapaEscalado(const uint8_t *bitmap) {
+  // Se agrupan los pixeles activos por fila para escalar el bitmap 160 x 120
+  // sin framebuffer ni asignaciones dinamicas. Las lineas se envian como
+  // tramos horizontales para evitar el costo de un drawPixel por bit.
+  pantalla.startWrite();
+  for (uint16_t y = 0; y < MAPA_ALTO_DIBUJADO; y++) {
+    const uint16_t origenY =
+        (static_cast<uint32_t>(y) * PipboyMapClient::ALTO_MAPA) /
+        MAPA_ALTO_DIBUJADO;
+    int inicioTrazo = -1;
 
-void cerrarArchivoMapaPng(void *archivo) {
-  (void)archivo;
-  if (archivoMapaPng) {
-    archivoMapaPng.close();
+    for (uint16_t x = 0; x <= MAPA_ANCHO_DIBUJADO; x++) {
+      const bool activo =
+          x < MAPA_ANCHO_DIBUJADO &&
+          pixelMapaActivo(
+              bitmap,
+              (static_cast<uint32_t>(x) * PipboyMapClient::ANCHO_MAPA) /
+                  MAPA_ANCHO_DIBUJADO,
+              origenY);
+
+      if (activo && inicioTrazo < 0) {
+        inicioTrazo = x;
+      } else if (!activo && inicioTrazo >= 0) {
+        pantalla.writeFastHLine(MAPA_X + inicioTrazo, MAPA_Y + y,
+                                x - inicioTrazo, VERDE_PIPBOY);
+        inicioTrazo = -1;
+      }
+    }
   }
-}
-
-int32_t leerArchivoMapaPng(PNGFILE *archivo, uint8_t *destino,
-                           int32_t bytes) {
-  (void)archivo;
-  if (!archivoMapaPng || bytes <= 0) {
-    return 0;
-  }
-  return static_cast<int32_t>(archivoMapaPng.read(destino, bytes));
-}
-
-int32_t posicionarArchivoMapaPng(PNGFILE *archivo, int32_t posicion) {
-  (void)archivo;
-  return archivoMapaPng && posicion >= 0 && archivoMapaPng.seek(posicion)
-             ? 1
-             : 0;
-}
-
-bool dibujarPngMapa() {
-  if (clienteMapa.rutaMapaPng() == nullptr) {
-    return false;
-  }
-
-  const int apertura = decodificadorMapaPng.open(
-      clienteMapa.rutaMapaPng(), abrirArchivoMapaPng, cerrarArchivoMapaPng,
-      leerArchivoMapaPng, posicionarArchivoMapaPng, dibujarLineaPngMapa);
-  if (apertura != PNG_SUCCESS) {
-    decodificadorMapaPng.close();
-    return false;
-  }
-
-  const bool dimensionesValidas =
-      decodificadorMapaPng.getWidth() == PipboyMapClient::ANCHO_MAPA &&
-      decodificadorMapaPng.getHeight() == PipboyMapClient::ALTO_MAPA;
-  const int resultado = dimensionesValidas
-                            ? decodificadorMapaPng.decode(nullptr,
-                                                          PNG_FAST_PALETTE)
-                            : PNG_INVALID_FILE;
-  decodificadorMapaPng.close();
-  return resultado == PNG_SUCCESS;
+  pantalla.endWrite();
 }
 
 void dibujarIconoJugadorMapaCompacto(int x, int y, uint16_t color) {
@@ -1498,12 +1452,11 @@ void dibujarPanelInformacionMapa() {
 void dibujarBitmapMapa() {
   pantalla.fillRect(MAPA_X, MAPA_Y, MAPA_ANCHO_DIBUJADO,
                     MAPA_ALTO_DIBUJADO, ST77XX_BLACK);
-  if (dibujarPngMapa()) {
-    // El PNG original ocupa todo el mapa y se preserva sin reticula ni
-    // bloques artificiales superpuestos.
-  } else {
-    dibujarReticulaMapa();
-    dibujarPlanoTecnicoMapa();
+  dibujarReticulaMapa();
+  dibujarPlanoTecnicoMapa();
+  const uint8_t *bitmap = clienteMapa.bitmap();
+  if (bitmap != nullptr) {
+    dibujarBitmapMapaEscalado(bitmap);
   }
   dibujarMarcadoresPruebaMapa();
   dibujarCruzMapa();

@@ -4,15 +4,16 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-// Descarga el PNG original de Mapbox a SPIFFS en una tarea de FreeRTOS. El
-// sketch principal lo decodifica desde ese archivo, sin reservar el PNG entero
-// en DRAM ni tocar SPI desde la tarea de red.
+// Descarga un mapa PBM1 en una tarea de FreeRTOS. El sketch principal solo
+// consulta el estado y dibuja el buffer cuando la descarga ya termino.
 class PipboyMapClient {
  public:
-  static constexpr uint16_t ANCHO_MAPA = 205;
-  static constexpr uint16_t ALTO_MAPA = 144;
-  // Limita el archivo almacenado, pero no reserva esta cantidad en RAM.
-  static constexpr size_t MAX_PNG_BYTES = 65536;
+  static constexpr uint16_t ANCHO_MAPA = 160;
+  static constexpr uint16_t ALTO_MAPA = 120;
+  static constexpr uint16_t BYTES_POR_FILA = ANCHO_MAPA / 8;
+  static constexpr uint16_t CABECERA_BYTES = 12;
+  static constexpr uint16_t BITMAP_BYTES = BYTES_POR_FILA * ALTO_MAPA;
+  static constexpr uint16_t RESPUESTA_BYTES = CABECERA_BYTES + BITMAP_BYTES;
 
   enum class Estado : uint8_t {
     SinConfiguracion,
@@ -24,7 +25,7 @@ class PipboyMapClient {
     ErrorTls,
     ErrorHttp,
     ErrorFormato,
-    ErrorAlmacenamiento,
+    ErrorSinDetalle,
     ErrorMemoria,
   };
 
@@ -48,7 +49,7 @@ class PipboyMapClient {
 
   bool hayMapaDisponible() const;
   bool hayMapaNuevo() const;
-  const char *rutaMapaPng() const;
+  const uint8_t *bitmap() const;
   void confirmarMapaDibujado();
   Estado estado() const;
   const char *textoEstado() const;
@@ -65,7 +66,8 @@ class PipboyMapClient {
   void terminarConMapa();
   bool estaConfigurado() const;
   bool debeActualizar(uint32_t ahora) const;
-  bool validarArchivoMapa(size_t bytesImagen) const;
+  bool validarRespuesta() const;
+  bool respuestaTieneDetalle() const;
   static bool tiempoAlcanzado(uint32_t ahora, uint32_t objetivo);
 
   Configuracion _configuracion = {};
@@ -74,7 +76,6 @@ class PipboyMapClient {
   volatile bool _tareaActiva = false;
   volatile bool _solicitudPendiente = false;
   volatile bool _forzarSolicitud = false;
-  volatile bool _almacenamientoDisponible = false;
   volatile bool _mapaDisponible = false;
   volatile bool _mapaNuevo = false;
   volatile uint32_t _inicioConexionWifiMs = 0;
@@ -85,4 +86,5 @@ class PipboyMapClient {
   uint8_t _zoom = 15;
   TaskHandle_t _tarea = nullptr;
   portMUX_TYPE _mutex = portMUX_INITIALIZER_UNLOCKED;
+  uint8_t _respuesta[RESPUESTA_BYTES] = {};
 };
